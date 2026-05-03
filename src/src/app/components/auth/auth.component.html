@@ -1,0 +1,118 @@
+<section class="flex flex-col md:flex-row h-screen items-center">
+
+  <!-- ── Auth panel ──────────────────────────────────────────────────────── -->
+  <div
+    class="relative bg-white dark:bg-primary-900 w-full md:max-w-md lg:max-w-full md:mx-auto md:w-1/2 xl:w-1/3 h-screen px-6 lg:px-16 xl:px-12 flex items-center justify-center">
+    <div class="max-w-xl w-full mx-auto">
+
+      <!-- Logo -->
+      <div class="max-w-32 mx-auto">
+        <img src="favicon.png" class="drop-shadow-sm" alt="STONKS logo" />
+      </div>
+
+      <!-- Mobile headline (hidden on desktop where the cover panel shows it) -->
+      <div class="block lg:hidden w-full">
+        <div class="mt-4 text-center">
+          <div class="text-4xl font-bold leading-none">Welcome to STONKS</div>
+          <div class="text-sm tracking-tight leading-6 text-primary-400">Stonks tracker</div>
+        </div>
+      </div>
+
+      <!-- Heading -->
+      <h1 class="mt-6 text-2xl font-bold text-primary-900 dark:text-white tracking-tight">
+        {{ isRegistering() ? 'Create an account' : 'Sign in' }}
+      </h1>
+      <p class="mt-1 mb-4 text-sm text-primary-400 dark:text-primary-500">
+        {{ isRegistering() ? 'Choose a username and password to get started' : 'Enter your credentials to continue' }}
+      </p>
+
+      <!-- Form — deferred so the skeleton shows during initial JS parse -->
+      @defer {
+
+      <div pFocusTrap class="mt-4" [formGroup]="form">
+
+        <!-- Username -->
+        <p-floatlabel variant="in">
+          <input pInputText id="username" formControlName="username" autocomplete="username" autocorrect="off"
+            autocapitalize="none" spellcheck="false" fluid autofocus />
+          <label for="username">Username</label>
+        </p-floatlabel>
+        @if (username.touched && username.hasError('required')) {
+        <span class="text-sm text-red-500 mt-1 block">Username is required</span>
+        } @else if (username.touched && username.hasError('maxlength')) {
+        <span class="text-sm text-red-500 mt-1 block">Username must be 19 characters or fewer</span>
+        } @else if (username.touched && username.hasError('pattern')) {
+        <span class="text-sm text-red-500 mt-1 block">Only letters, numbers, _ and - are allowed</span>
+        }
+
+        <!-- Password -->
+        <p-floatlabel variant="in" class="mt-4 block">
+          <input pInputText type="password" id="password" formControlName="password"
+            [autocomplete]="isRegistering() ? 'new-password' : 'current-password'" fluid (keyup.enter)="submit()" />
+          <label for="password">Password</label>
+        </p-floatlabel>
+        @if (password.touched && password.hasError('required')) {
+        <span class="text-sm text-red-500 mt-1 block">Password is required</span>
+        }
+
+        <!-- Submit -->
+        <div class="mt-6 flex justify-end">
+          <p-button [label]="isRegistering() ? 'Create Account' : 'Sign In'" [disabled]="form.invalid || isLoading()"
+            [loading]="isLoading()" (click)="submit()" />
+        </div>
+
+      </div>
+
+      <hr class="my-6 border-primary-200 dark:border-primary-700 w-full" />
+
+      <!-- Mode toggle -->
+      <p class="text-sm select-none text-primary-500 dark:text-primary-400">
+        {{ isRegistering() ? 'Already have an account?' : 'First time here?' }}
+        <button type="button"
+          class="text-blue-500 hover:text-blue-700 font-semibold cursor-pointer bg-transparent border-0 p-0 ml-1"
+          (click)="toggleMode()">
+          {{ isRegistering() ? 'Sign in' : 'Create an account' }}
+        </button>
+      </p>
+
+      } @placeholder (minimum 400ms) {
+
+      <!-- Skeleton — mirrors the real form layout to prevent layout shift -->
+      <div class="mt-4">
+        <p-skeleton width="100%" height="3.5rem" />
+      </div>
+      <div class="mt-4">
+        <p-skeleton width="100%" height="3.5rem" />
+      </div>
+      <div class="mt-4 flex justify-end">
+        <p-skeleton width="7rem" height="2.5rem" />
+      </div>
+
+      }
+
+    </div>
+
+    <!-- Footer -->
+    <div class="absolute bottom-4 left-1/2 -translate-x-1/2 text-sm flex flex-col items-center gap-2">
+      <a href="https://github.com/itskovacs/stonks"
+        class="flex items-center gap-1 text-primary-400 hover:text-primary-600 transition-colors" target="_blank"
+        rel="noopener noreferrer">
+        <i class="pi pi-github"></i>
+        itskovacs/stonks
+      </a>
+      <span class="font-light text-primary-400 text-xs">Made with ❤️ in BZH</span>
+    </div>
+  </div>
+
+  <!-- ── Cover panel (desktop only) ─────────────────────────────────────── -->
+  <div class="hidden lg:block flex-1 h-full cover-auth relative overflow-hidden">
+    <div class="absolute inset-0 bg-linear-to-t from-black/50 via-black/10 to-transparent"></div>
+    <div class="absolute bottom-12 xl:bottom-16 left-12 xl:left-16 right-12">
+      <span class="text-xs font-bold tracking-[0.25em] uppercase text-white/35 mb-4 block">
+        STONKS TRACKER · MUCH WOW
+      </span>
+      <div class="text-4xl lg:text-5xl font-bold leading-tight text-white/85">Welcome to STONKS</div>
+    </div>
+  </div>
+
+</section>

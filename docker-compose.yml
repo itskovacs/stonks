@@ -1,0 +1,8 @@
+services:
+  app:
+    image: ghcr.io/itskovacs/stonks:1
+    ports:
+      - 127.0.0.1:8080:8000 #127.0.0.1: locally exposed, on port 8080 by default
+    volumes:
+      - ./storage:/app/storage
+    command: ["fastapi", "run", "/app/main.py", "--host", "0.0.0.0"]

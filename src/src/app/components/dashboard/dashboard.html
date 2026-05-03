@@ -1,0 +1,881 @@
+<div
+    class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 bg-primary-50 text-primary-900 font-sans antialiased min-h-screen selection:bg-blue-100">
+
+    <!-- ── KPI strip ──────────────────────────────────────────────────────── -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+
+        <!-- Total Portfolio Value -->
+        <div
+            class="col-span-2 md:col-span-1 bg-white rounded-lg p-4 shadow-sm ring-1 ring-primary-200 flex items-center">
+            <div class="flex flex-col gap-1 justify-center flex-1 min-w-0">
+                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-[0.13em]">Total investment</p>
+                <p class="will-change-[filter] text-xl font-black text-primary-900 filter-[blur(6px)] [transition:filter_0.2s_ease] hover:filter-[blur(0px)] data-[revealed=true]:filter-[blur(0px)] cursor-pointer select-none"
+                    [attr.data-revealed]="isRevealed()" (click)="toggleReveal()">
+                    {{ totals().total_value | number:'1.0-0' }}</p>
+            </div>
+            <div class="border-l border-primary-100 flex flex-col gap-1 pl-4 shrink-0">
+                <div class="flex justify-start items-center gap-1">
+                    <p class="text-[8px] font-bold uppercase tracking-[0.13em]"
+                        [class]="totals().total_change_1d >= 0 ? 'text-emerald-500' : 'text-red-400'">
+                        {{ totals().total_change_1d >= 0 ? '▲' : '▼' }} Today
+                    </p>
+                    <p class="text-xs font-medium"
+                        [class]="totals().total_change_1d >= 0 ? 'text-emerald-500' : 'text-red-400'">
+                        {{ totals().total_change_1d >= 0 ? '+' : '' }}{{ totals().total_change_1d_pct }}%
+                    </p>
+                </div>
+                <div class="flex items-center gap-1">
+                    <p class="text-[8px] font-bold uppercase tracking-[0.13em]"
+                        [class]="totals().total_pnl >= 0 ? 'text-emerald-500' : 'text-red-400'">
+                        {{ totals().total_pnl >= 0 ? '▲' : '▼' }} All Time
+                    </p>
+                    <p class="text-xs font-medium"
+                        [class]="totals().total_pnl >= 0 ? 'text-emerald-500' : 'text-red-400'">
+                        {{ totals().total_pnl >= 0 ? '+' : '' }}{{ totals().total_pnl_pct }}%
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Invested Capital + Cash -->
+        <div
+            class="col-span-2 md:col-span-1 bg-white rounded-lg p-4 shadow-sm ring-1 ring-primary-200 flex items-center">
+            <div class="flex flex-col gap-1 justify-center flex-1 min-w-0">
+                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-[0.13em]">Invested Capital</p>
+                <p class="will-change-[filter] text-xl font-bold text-primary-900 filter-[blur(6px)] [transition:filter_0.2s_ease] hover:filter-[blur(0px)] data-[revealed=true]:filter-[blur(0px)] cursor-pointer select-none"
+                    [attr.data-revealed]="isRevealed()" (click)="toggleReveal()">
+                    {{ totals().total_cost_basis | number:'1.0-0' }}</p>
+            </div>
+            <div class="border-l border-primary-100 flex flex-col gap-1 pl-4 shrink-0 justify-center">
+                <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.13em]">Unallocated</p>
+                <p class="will-change-[filter] text-xs font-bold text-primary-900 filter-[blur(6px)] [transition:filter_0.2s_ease] hover:filter-[blur(0px)] data-[revealed=true]:filter-[blur(0px)] cursor-pointer select-none"
+                    [attr.data-revealed]="isRevealed()" (click)="toggleReveal()">
+                    {{ totals().total_cash | number:'1.0-0' }}</p>
+            </div>
+        </div>
+
+        <!-- Net Deposits (multi-period) + Dividends -->
+        <div class="bg-white rounded-lg p-4 shadow-sm ring-1 ring-primary-200 flex items-center gap-2 sm:gap-4">
+            <div class="flex flex-col gap-1 justify-center flex-1 min-w-0">
+                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-[0.13em]">Net Deposits</p>
+                <div class="grid gap-2 sm:gap-4 grid-cols-2">
+                    @for (entry of depositEntries; track entry.key) {
+                    <div class="flex flex-col gap-0.5">
+                        <span class="text-[8px] font-semibold text-primary-300 uppercase w-4 shrink-0">{{ entry.label
+                            }}</span>
+                        <span
+                            class="will-change-[filter] text-xs font-bold text-primary-900 filter-[blur(6px)] [transition:filter_0.2s_ease] hover:filter-[blur(0px)] data-[revealed=true]:filter-[blur(0px)] cursor-pointer select-none tabular-nums"
+                            [attr.data-revealed]="isRevealed()" (click)="toggleReveal()">
+                            {{ totals().net_deposits[entry.key] | compactNumber:1 }}
+                        </span>
+                    </div>
+                    }
+                </div>
+            </div>
+            <div class="border-l border-primary-100 flex flex-col gap-1 pl-2 sm:pl-4 justify-center">
+                <p
+                    class="flex flex-col sm:flex-row sm:items-center text-[8px] font-bold text-primary-400 uppercase tracking-[0.13em]">
+                    Div. <span class="text-[7px]">(90d)</span></p>
+                <p class="will-change-[filter] text-xs font-bold text-primary-900 filter-[blur(6px)] [transition:filter_0.2s_ease] hover:filter-[blur(0px)] data-[revealed=true]:filter-[blur(0px)] cursor-pointer select-none"
+                    [attr.data-revealed]="isRevealed()" (click)="toggleReveal()">
+                    {{ totals().dividend_income_90d | number:'1.0-0' }}</p>
+            </div>
+        </div>
+
+        <!-- Annualised Volatility -->
+        <div class="bg-white rounded-lg p-4 shadow-sm ring-1 ring-primary-200 flex flex-col gap-1 justify-center">
+            <div class="flex items-center justify-between">
+                <p class="text-[9px] font-bold text-primary-400 tracking-[0.13em] uppercase">1Y Volatility</p>
+                <span
+                    class="bg-primary-50 text-primary-500 text-[8px] px-1.5 py-0.5 rounded font-bold tracking-wider">RISK</span>
+            </div>
+            @if (overviewStats()?.volatility_annualized_pct != null) {
+            <p class="text-xl font-black text-primary-900 tabular-nums">
+                {{ overviewStats()!.volatility_annualized_pct | number:'1.1-1' }}%
+            </p>
+            } @else {
+            <p class="text-xl font-bold text-primary-500 tabular-nums">-</p>
+            }
+        </div>
+    </section>
+
+    <!-- ── Envelopes ──────────────────────────────────────────────────────── -->
+    <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+        @for (env of envelopes(); track env.id) {
+        <div
+            class="group relative bg-white border border-primary-200 p-3 rounded-lg flex justify-between items-center shadow-sm hover:border-primary-300 transition-colors">
+
+            <div class="flex items-center gap-2">
+                <div class="h-2 w-2 rounded-full shrink-0" [style.background]="env.color"></div>
+                <div class="flex flex-col gap-1 justify-center min-w-0 pr-4">
+                    <p class="text-xs font-medium text-primary-900 leading-none uppercase tracking-wide truncate">
+                        {{ env.name }}
+                    </p>
+                    <p class="text-[9px] text-primary-500 font-medium tabular-nums tracking-wide">
+                        <span class="text-primary-300">Unalloc.</span> {{ env.cash_available | number:'1.0-0' }}
+                    </p>
+                </div>
+            </div>
+
+            <div class="border-l border-primary-100 flex flex-col gap-1 pl-4 shrink-0 justify-center">
+                <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.13em]">Valued</p>
+                <p class="will-change-[filter] text-xs sm:text-sm font-black text-primary-900 tabular-nums font-mono leading-none filter-[blur(6px)] [transition:filter_0.2s_ease] hover:filter-[blur(0px)] data-[revealed=true]:filter-[blur(0px)] cursor-pointer select-none"
+                    [attr.data-revealed]="isRevealed()" (click)="toggleReveal()">
+                    {{ env.total_value | compactNumber:1 }}</p>
+            </div>
+
+            <!-- Edit button — appears on hover -->
+            <button (click)="$event.stopPropagation(); openEnvelopeDialog(env)"
+                class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-primary-100 text-primary-400 hover:text-primary-700 cursor-pointer"
+                title="Edit envelope">
+                <i class="pi pi-pencil text-[9px]"></i>
+            </button>
+        </div>
+        }
+
+        <button (click)="openEnvelopeDialog()"
+            class="bg-white border border-dashed border-primary-300 px-6 py-3 rounded-lg flex gap-1.5 justify-center items-center text-primary-400 text-[9px] font-bold uppercase tracking-widest hover:border-primary-500 hover:text-primary-600 hover:bg-primary-50 transition-all duration-200 cursor-pointer outline-none focus:ring-2 focus:ring-primary-200 focus:ring-offset-1 active:scale-[0.98]">
+            <i class="pi pi-plus text-[8px] font-black"></i> Envelope
+        </button>
+    </section>
+
+    <!-- ── Watchlist ──────────────────────────────────────────────────────── -->
+    <section class="bg-white border border-primary-200 rounded-xl overflow-hidden">
+        <div class="px-5 py-4 flex items-center justify-between border-b border-primary-100">
+            <h2 class="text-sm font-bold text-primary-900">Tickers</h2>
+            <div class="flex items-center gap-2 justify-end">
+                <button (click)="openTickerBrowser()"
+                    class="text-[9px] font-semibold text-primary-600 uppercase tracking-wider border border-primary-200 rounded-md px-3 py-1.5 bg-white hover:bg-primary-900 hover:text-white hover:border-primary-900 transition-all cursor-pointer">
+                    <i class="pi pi-search text-[9px]!"></i> Browse
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 p-4 gap-3">
+            @defer {
+            @for (item of watchlist(); track item.ticker) {
+            <div [routerLink]="'ticker/' + item.ticker" class="group/card relative cursor-pointer outline-none bg-white border border-primary-200 rounded-md hover:shadow-sm hover:border-primary-300
+                hover:-translate-y-px transition-all duration-180">
+
+                <!-- Remove button — appears on hover -->
+                <button (click)="$event.stopPropagation(); removeFromWatchlist(item.ticker)" class="absolute top-1.5 right-1.5 z-10 opacity-0 group-hover/card:opacity-100 transition-opacity p-0.5 rounded hover:bg-red-50 text-primary-300
+                    hover:text-red-400 cursor-pointer" title="Remove from watchlist">
+                    <i class="pi pi-times text-[8px]"></i>
+                </button>
+
+                <div class="flex items-start justify-between p-4 pb-0">
+                    <div class="flex flex-col flex-1 min-w-0">
+                        <h3 class="font-black text-primary-900 leading-none truncate">{{ item.ticker }}</h3>
+                        <div class="flex flex-col justify-start gap-0.5 mt-1">
+                            <!-- item.name is the company/ETF full name from WatchlistRow -->
+                            <p class="text-[10px] text-primary-400 font-medium tracking-wide truncate max-w-[80px]">
+                                {{ item.name || item.ticker }}
+                            </p>
+                            @if (item.sector) {
+                            <span class="bg-primary-50 text-primary-500 text-[8px] px-1 rounded truncate">{{ item.sector
+                                }}</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end shrink-0 pl-2">
+                        <p class="text-[14px] font-extrabold text-primary-900 tabular-nums leading-none font-mono">
+                            {{ item.current_price | number:'1.2-2' }}<span class="text-[9px] font-sans ml-0.5">{{
+                                item.currency }}</span>
+                        </p>
+                        <span class="text-[9px] font-bold tabular-nums mt-1"
+                            [class]="item.change_1d_pct >= 0 ? 'text-emerald-600' : 'text-red-500'">
+                            {{ item.change_1d_pct >= 0 ? '+' : '' }}{{ item.change_1d_pct | number:'1.2-2' }}%
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Real 7-day sparkline from history_7d -->
+                <div class="mt-1 h-9 w-full" [attr.aria-label]="item.ticker + ' 7-day sparkline'">
+                    <svg class="w-full h-full" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true">
+                        <defs>
+                            <linearGradient [attr.id]="'sg-' + item.ticker" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" [attr.stop-color]="item.change_1d >= 0 ? '#10b981' : '#ef4444'"
+                                    stop-opacity="0.15" />
+                                <stop offset="100%" [attr.stop-color]="item.change_1d >= 0 ? '#10b981' : '#ef4444'"
+                                    stop-opacity="0" />
+                            </linearGradient>
+                        </defs>
+                        <path [attr.d]="sparklinePath(item.history_7d, true)"
+                            [attr.fill]="'url(#sg-' + item.ticker + ')'" />
+                        <path [attr.d]="sparklinePath(item.history_7d)" fill="none"
+                            [attr.stroke]="item.change_1d >= 0 ? '#10b981' : '#ef4444'" stroke-width="1.5"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </div>
+            </div>
+            } @empty {
+            <div class="col-span-full py-8 flex flex-col items-center justify-center text-center">
+                <p class="text-sm font-bold text-primary-900">Your watchlist is empty</p>
+                <p class="text-xs text-primary-500 mt-1 max-w-xs">Search for a ticker to start tracking stocks and ETFs.
+                </p>
+            </div>
+            }
+            } @placeholder (minimum 1s) {
+            @for (i of [1, 2, 3]; track i) {
+            <div class="bg-white border border-primary-100 rounded-md p-4 pb-0 flex flex-col gap-3">
+                <div class="flex justify-between items-start">
+                    <div class="flex flex-col gap-0.5 w-1/2">
+                        <p-skeleton width="80%" height="1rem" />
+                        <p-skeleton width="100%" height="0.8rem" />
+                    </div>
+                    <div class="flex flex-col items-end gap-0.5 w-1/3">
+                        <p-skeleton width="100%" height="1rem" />
+                        <p-skeleton width="60%" height="0.8rem" />
+                    </div>
+                </div>
+                <div class="pb-2">
+                    <p-skeleton width="100%" height="1.5rem" />
+                </div>
+            </div>
+            }
+            }
+        </div>
+    </section>
+
+    <!-- ── Portfolio Matrix + Ledger ─────────────────────────────────────── -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        <!-- Position table -->
+        <div
+            class="lg:col-span-2 bg-white border border-primary-200 rounded-xl flex flex-col overflow-y-auto max-h-[400px]">
+            <div class="px-5 py-4 flex items-center justify-between border-b border-primary-100">
+                <h2 class="text-sm font-bold text-primary-900">Portfolio Matrix</h2>
+            </div>
+
+            @if (positions().length) {
+            <div class="overflow-auto flex-1">
+                <p-table [value]="positions()" sortField="envelope_name" sortMode="single" rowGroupMode="subheader"
+                    groupRowsBy="envelope_name">
+
+                    <ng-template #header>
+                        <tr class="border-b border-primary-100">
+                            <th
+                                class="py-2.5 px-5 text-[9px] font-bold text-primary-400 uppercase tracking-widest bg-white">
+                                Asset</th>
+                            <th
+                                class="py-2.5 px-4 text-[9px] font-bold text-primary-400 uppercase tracking-widest text-right bg-white">
+                                Unrealized P&amp;L</th>
+                            <th
+                                class="py-2.5 px-5 text-[9px] font-bold text-primary-400 uppercase tracking-widest w-28 bg-white">
+                                Allocation</th>
+                            <th
+                                class="py-2.5 px-4 text-[9px] font-bold text-primary-400 uppercase tracking-widest text-right bg-white">
+                                Current Price</th>
+                            <th
+                                class="py-2.5 px-4 text-[9px] font-bold text-primary-400 uppercase tracking-widest text-right bg-white">
+                                Positions</th>
+                        </tr>
+                    </ng-template>
+
+                    <ng-template #groupheader let-pos>
+                        <!-- Compute metrics once per group header, not per-cell -->
+                        @let m = envelopeMetrics()[pos.envelope_name] ?? { invested: 0, pnl: 0, allocation: 0 };
+                        <tr class="border-y border-primary-100">
+                            <td class="relative">
+                                <div class="absolute left-0 top-0 bottom-0 w-1 bg-primary-300 rounded-r-sm"></div>
+                                <div class="flex items-center gap-2.5">
+                                    <span class="text-xs font-black text-primary-900 uppercase tracking-[0.15em]">{{
+                                        pos.envelope_name }}</span>
+                                </div>
+                            </td>
+
+                            <td class="text-right align-middle">
+                                <div class="flex flex-col items-end justify-center">
+                                    <p class="text-[11px] font-bold tabular-nums leading-none font-mono"
+                                        [class]="m.pnl >= 0 ? 'text-emerald-600' : 'text-red-500'">
+                                        {{ m.pnl >= 0 ? '+' : '' }}{{ m.pnl | number:'1.0-0' }}
+                                    </p>
+                                    <span
+                                        class="text-[8px] font-medium text-primary-400 uppercase tracking-widest mt-1">Total
+                                        P&L</span>
+                                </div>
+                            </td>
+
+                            <td class="w-28 align-middle">
+                                <div class="flex flex-col items-start justify-center">
+                                    <p class="text-[11px] font-bold text-primary-600 tabular-nums leading-none">
+                                        {{ m.allocation | number:'1.1-1' }}%
+                                    </p>
+                                    <span
+                                        class="text-[8px] font-medium text-primary-400 uppercase tracking-widest mt-1">Weight</span>
+                                </div>
+                            </td>
+
+                            <td></td>
+
+                            <td class="text-right align-middle">
+                                <div class="flex flex-col items-end justify-center">
+                                    <p class="text-sm font-black text-primary-900 tabular-nums leading-none font-mono">
+                                        {{ m.invested | number:'1.0-0' }}
+                                    </p>
+                                    <span
+                                        class="text-[8px] font-medium text-primary-400 uppercase tracking-widest mt-1">Invested</span>
+                                </div>
+                            </td>
+                        </tr>
+                    </ng-template>
+
+                    <ng-template #body let-pos>
+                        <tr
+                            class="not-last:border-b not-last:border-primary-50 hover:bg-primary-50/70 transition-colors duration-150 group">
+
+                            <td class="py-3 px-5">
+                                <p [routerLink]="'ticker/' + pos.ticker"
+                                    class="cursor-pointer text-sm font-bold text-primary-900 group-hover:text-blue-600 transition-colors leading-none">
+                                    {{ pos.ticker }}
+                                </p>
+                                <!-- pos.name is nullable per spec — fall back to ticker symbol -->
+                                @if (pos.name) {
+                                <p class="text-[9px] text-primary-400 mt-0.5 truncate max-w-[100px]">{{ pos.name }}</p>
+                                }
+                            </td>
+
+                            <td class="py-3 px-4 text-right">
+                                <p class="text-xs font-black tabular-nums leading-none font-mono"
+                                    [class]="pos.unrealized_pnl >= 0 ? 'text-emerald-600' : 'text-red-500'">
+                                    {{ pos.unrealized_pnl >= 0 ? '+' : '' }}{{ pos.unrealized_pnl | number:'1.0-0' }} {{
+                                    pos.currency }}
+                                </p>
+                                <span
+                                    class="inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-md tabular-nums mt-1"
+                                    [class]="pos.unrealized_pnl_pct >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'">
+                                    {{ pos.unrealized_pnl_pct >= 0 ? '+' : '' }}{{ pos.unrealized_pnl_pct |
+                                    number:'1.2-2' }}%
+                                </span>
+                            </td>
+
+                            <td class="py-3 px-5 w-28">
+                                <p class="text-[9px] font-semibold text-primary-500 tabular-nums mb-1.5">
+                                    {{ pos.allocation_pct | number:'1.1-1' }}%
+                                </p>
+                                <div class="w-full bg-primary-100 h-1.5 rounded-full overflow-hidden">
+                                    <div class="h-full bg-primary-900 rounded-full transition-[width] duration-700"
+                                        [style.width.%]="pos.allocation_pct"></div>
+                                </div>
+                            </td>
+
+                            <td class="py-3 px-4 text-right">
+                                <p class="text-xs font-bold text-primary-900 tabular-nums leading-none font-mono">
+                                    {{ pos.current_price | number:'1.2-2' }} {{ pos.currency }}
+                                </p>
+                                <p class="text-xs font-semibold tabular-nums mt-0.5"
+                                    [class]="pos.change_1d_pct >= 0 ? 'text-emerald-500' : 'text-red-400'">
+                                    {{ pos.change_1d_pct >= 0 ? '+' : '' }}{{ pos.change_1d_pct | number:'1.2-2' }}%
+                                </p>
+                            </td>
+
+                            <td class="py-3 px-4 text-right">
+                                <p class="text-xs font-bold text-primary-900 tabular-nums leading-none font-mono">
+                                    {{ pos.current_value | number:'1.0-2' }} {{ pos.currency }}
+                                </p>
+                                <p class="text-[9px] text-primary-400 font-medium tabular-nums mt-0.5">
+                                    {{ pos.shares }} &times; {{ pos.avg_cost | number:'1.2-2' }} {{ pos.currency }}
+                                </p>
+                                <p class="text-[8px] text-primary-300 font-medium tabular-nums mt-0.5">
+                                    Basis: {{ pos.cost_basis | number:'1.0-2' }} {{ pos.currency }}
+                                </p>
+                            </td>
+                        </tr>
+                    </ng-template>
+
+                    <ng-template #empty>
+                        <tr>
+                            <td colspan="5" class="py-12 text-center bg-white">
+                                <div class="flex flex-col items-center justify-center">
+                                    <p class="text-sm font-bold text-primary-900">No active positions</p>
+                                    <p class="text-xs text-primary-500 mt-1 max-w-xs">Log a BUY transaction to see your
+                                        assets here.</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </ng-template>
+                </p-table>
+            </div>
+            } @else {
+            <div class="flex-1 py-8 flex flex-col items-center justify-center text-center">
+                <p class="text-sm font-bold text-primary-900">No positions</p>
+                <p class="text-xs text-primary-500 mt-1 max-w-xs">Add transactions to display your portfolio matrix</p>
+            </div>
+            }
+        </div>
+
+        <!-- Transaction ledger -->
+        <div class="lg:col-span-1 bg-white border border-primary-200 rounded-xl flex flex-col max-h-[400px]">
+            <div class="px-5 py-4 flex items-center justify-between border-b border-primary-100">
+                <h2 class="text-sm font-bold text-primary-900">Portfolio Ledger</h2>
+                <button (click)="openTransactionDialog()" [disabled]="!envelopes().length"
+                    class="text-[9px] font-semibold text-primary-600 uppercase tracking-wider border border-primary-200 rounded-md px-3 py-1.5 bg-white hover:bg-primary-900 hover:text-white hover:border-primary-900 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                    + Log
+                </button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto px-4 py-2">
+                @for (trade of transactions(); track trade.id) {
+                @let tx = txConfig[trade.type];
+                <div
+                    class="group relative flex items-center gap-3 py-3 not-last:border-b not-last:border-primary-50 hover:bg-primary-50/60 rounded-lg px-1 transition-colors duration-150">
+                    <div class="h-8 w-12 flex items-center justify-center shrink-0 rounded-lg text-[10px] font-extrabold border"
+                        [class]="tx.class">
+                        {{ tx.displayValue }}
+                    </div>
+
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-baseline justify-between gap-1">
+                            <span class="text-sm font-bold text-primary-900 leading-none">
+                                {{ trade.ticker || trade.type }}
+                                <span class="text-[8px] font-medium text-primary-400 ml-1 tracking-wide uppercase">In {{
+                                    trade.envelope_name }}</span>
+                            </span>
+                            <time
+                                class="text-[9px] font-medium text-primary-400 tabular-nums shrink-0 opacity-100 group-hover:opacity-0">
+                                {{ trade.date | date:'MMM d' }}
+                            </time>
+                        </div>
+
+                        <div class="flex items-center justify-between mt-px">
+                            <span class="text-[9px] text-primary-400 font-medium uppercase tracking-wide">
+                                @if (!trade.shares && !trade.fees) { - } @else {
+                                @if (trade.shares > 0) { {{ trade.shares }} &times; {{ trade.price | number:'1.2-2' }}
+                                }
+                                @if (trade.fees > 0) { <span class="text-red-400 ml-1">+{{ trade.fees | number:'1.2-2'
+                                    }} fee</span> }
+                                }
+                            </span>
+                            <span class="text-xs font-bold tabular-nums font-mono opacity-100 group-hover:opacity-0"
+                                [class]="trade.type === 'BUY' || trade.type === 'WITHDRAW' ? 'text-primary-700' : 'text-emerald-600'">
+                                {{ trade.type === 'BUY' || trade.type === 'WITHDRAW' ? '-' : '+' }}{{ trade.total |
+                                number:'1.0-0' }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div
+                        class="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-1">
+                        <p-button (click)="deleteTransaction(trade.id)" icon="pi pi-trash" size="small"
+                            severity="danger" />
+                    </div>
+                </div>
+                } @empty {
+                <div class="h-full flex flex-col items-center justify-center py-8 px-4 text-center">
+                    <i class="pi pi-receipt text-primary-200 text-2xl mb-2"></i>
+                    <p class="text-xs font-semibold text-primary-400">No transactions logged.</p>
+                </div>
+                }
+            </div>
+
+            <div class="px-5 py-3 border-t border-primary-100 shrink-0">
+                <button
+                    class="w-full text-[9px] font-bold text-primary-400 hover:text-primary-800 uppercase tracking-[0.14em] transition-colors cursor-pointer py-0.5">
+                    View Full History
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── Invested Equity chart ──────────────────────────────────────────── -->
+    <section class="bg-white border border-primary-200 rounded-xl">
+        <div
+            class="px-5 py-4 flex flex-col gap-1 sm:gap-0 sm:flex-row items-center sm:justify-between border-b border-primary-100">
+            <h2 class="text-sm font-bold text-primary-900">Invested Equity</h2>
+
+            <div class="flex items-center p-1 rounded-md text-xs font-bold text-primary-600">
+                @for (range of timeRanges(); track range.label) {
+                <button (click)="setTimeRange(range.label)" class="px-3 py-1.5 rounded cursor-pointer transition-colors"
+                    [disabled]="isChartLoading() || !hasAnyPortfolioData()"
+                    [class]="range.active ? 'bg-white text-blue-600 shadow-sm ring-1 ring-primary-100' : 'hover:bg-primary-50 hover:text-primary-900'">@if
+                    (range.active && isChartLoading()) {
+                    <i class="pi pi-spinner pi-spin text-blue-500 text-[10px]"></i> } @else { {{ range.label }} }
+                </button>
+                }
+            </div>
+        </div>
+
+        @if (isDataLoaded() && !hasAnyPortfolioData()) {
+        <!-- ── Case A: New user — no portfolio data at all ───────────────── -->
+        <div class="h-[350px] flex flex-col items-center justify-center gap-3 px-8 text-center">
+            <div class="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center">
+                <i class="pi pi-chart-line text-primary-400 text-sm"></i>
+            </div>
+            <div>
+                <p class="text-sm font-bold text-primary-900">No portfolio data yet</p>
+                <p class="text-xs text-primary-400 mt-1 max-w-xs leading-relaxed">
+                    Log your first transaction to start tracking your equity over time.
+                </p>
+            </div>
+            <button (click)="openTransactionDialog()" [disabled]="!envelopes().length"
+                class="mt-1 text-[10px] font-semibold uppercase tracking-wider border border-primary-300 rounded-md px-4 py-1.5 text-primary-600 hover:bg-primary-900 hover:text-white hover:border-primary-900 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                + Log Transaction
+            </button>
+        </div>
+
+        } @else {
+
+        <!-- Legend row — hidden while loading to avoid stale labels flashing -->
+        @if (!isChartLoading() && chartSeries().length) {
+        <div class="px-6 pt-5 pb-1 flex flex-wrap items-center gap-x-6 gap-y-3">
+            @for (series of chartSeries(); track series.name) {
+            <div class="flex items-center gap-2 cursor-default group">
+                <span
+                    class="w-2.5 h-2.5 rounded-full ring-2 ring-white shadow-sm transition-transform group-hover:scale-110"
+                    [style.backgroundColor]="series.color"></span>
+                <span class="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">{{ series.name }}</span>
+            </div>
+            }
+        </div>
+        }
+
+        <!-- Chart body — dims while loading; swapped for a message when no period data -->
+        <div class="pl-2 pb-2 w-full h-[350px] relative transition-opacity duration-300"
+            [class.opacity-40]="isChartLoading()">
+
+            @if (!isChartLoading() && !hasChartData()) {
+            <!-- ── Case B: Data exists but not for this period ────────────── -->
+            <div class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
+                <i class="pi pi-calendar-times text-primary-200 text-2xl"></i>
+                <p class="text-sm font-semibold text-primary-900">No data for this period</p>
+                <p class="text-xs text-primary-400 max-w-xs leading-relaxed">
+                    Your portfolio has no recorded activity in the selected timeframe.
+                </p>
+            </div>
+            } @else {
+            <canvas #portfolioChart></canvas>
+            }
+        </div>
+
+        }
+    </section>
+</div>
+
+
+<!-- ── Envelope dialog ─────────────────────────────────────────────────────── -->
+<p-dialog [header]="isEditingEnvelope ? 'Edit Envelope' : 'New Envelope'" [(visible)]="isEnvelopeDialogOpen"
+    [draggable]="false" [dismissableMask]="true" [modal]="true" [resizable]="false"
+    styleClass="max-w-xl w-[95%] md:w-[70%] lg:w-[50%]">
+
+    <div [formGroup]="envelopeForm" class="space-y-4">
+        <p class="text-sm text-primary-500">
+            An envelope holds your positions, to track a specific group of assets separately.
+        </p>
+
+        <p-floatlabel variant="in">
+            <input id="env-name" formControlName="name"
+                (keyup.enter)="isEditingEnvelope ? updateEnvelope() : createEnvelope()" pInputText fluid
+                pSize="small" />
+            <label for="env-name">Name</label>
+        </p-floatlabel>
+
+        <div class="mt-4 flex justify-center gap-4">
+            @for (c of envelopeColors; track c) {
+            <label class="group relative cursor-pointer flex items-center justify-center">
+                <input type="radio" name="color" [value]="c" formControlName="color" class="peer sr-only" required />
+                <span
+                    class="w-8 h-8 rounded-full transition-all duration-200 ease-in-out group-hover:scale-110 peer-checked:scale-100 peer-checked:outline-2 peer-checked:outline-offset-2 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2"
+                    [style.backgroundColor]="c" [style.outlineColor]="c">
+                </span>
+            </label>
+            }
+        </div>
+    </div>
+
+    <ng-template #footer>
+        <div class="flex justify-between gap-2">
+            <!-- Danger zone: delete only visible in edit mode -->
+            @if (isEditingEnvelope) {
+            <p-button label="Delete" icon="pi pi-trash" severity="danger" [text]="true" size="small"
+                (onClick)="deleteEnvelope()" [disabled]="isCreatingEnvelope()" [loading]="isCreatingEnvelope()" />
+            } @else {
+            <span></span>
+            }
+            <div class="flex gap-2">
+                <p-button label="Cancel" icon="pi pi-times" [text]="true" severity="secondary"
+                    (onClick)="closeEnvelopeDialog()" [disabled]="isCreatingEnvelope()" size="small" />
+                @if (isEditingEnvelope) {
+                <p-button label="Update" icon="pi pi-check" (onClick)="updateEnvelope()"
+                    [loading]="isCreatingEnvelope()" [disabled]="!envelopeForm.valid || isCreatingEnvelope()"
+                    size="small" />
+                } @else {
+                <p-button label="Create" icon="pi pi-check" (onClick)="createEnvelope()"
+                    [loading]="isCreatingEnvelope()" [disabled]="!envelopeForm.valid || isCreatingEnvelope()"
+                    size="small" />
+                }
+            </div>
+        </div>
+    </ng-template>
+</p-dialog>
+
+
+<!-- ── Transaction dialog ──────────────────────────────────────────────────── -->
+<p-dialog header="Transaction" [(visible)]="isTransactionDialogOpen" [draggable]="false" [dismissableMask]="true"
+    [modal]="true" [resizable]="false" styleClass="max-w-xl w-[95%] md:w-[70%] lg:w-[50%]">
+
+    <div class="flex flex-col items-center justify-center gap-1 mt-2 mb-4">
+        <p class="text-sm text-primary-500">
+            {{ transactionMode() === 'form' ? 'Record a new trade, deposit, or withdrawal.' : 'Paste multiple
+            transactions in text format.' }}
+        </p>
+        <p-selectbutton [options]="transactionModeOptions" [ngModel]="transactionMode()"
+            (ngModelChange)="setTransactionMode($event)" optionLabel="label" optionValue="value" size="small"
+            [allowEmpty]="false" />
+    </div>
+
+    @if (transactionMode() === 'form') {
+    <form [formGroup]="transactionForm" (ngSubmit)="createTransaction()" class="space-y-4 pt-2">
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <p-floatlabel variant="in">
+                <p-select id="tx-type" formControlName="type" [options]="transactionTypes" fluid optionLabel="label"
+                    optionValue="value" pSize="small" />
+                <label for="tx-type">Type</label>
+            </p-floatlabel>
+
+            <p-floatlabel variant="in" class="sm:col-span-2">
+                <p-select id="tx-envelope" formControlName="envelope_name" [options]="envelopes()" fluid
+                    optionLabel="name" optionValue="name" pSize="small" />
+                <label for="tx-envelope">Envelope</label>
+            </p-floatlabel>
+        </div>
+
+        <p-floatlabel variant="in">
+            <p-datepicker id="tx-date" formControlName="date" fluid dateFormat="yy-mm-dd" appendTo="body"
+                [showIcon]="true" pSize="small" />
+            <label for="tx-date">Date</label>
+        </p-floatlabel>
+
+        @if (transactionForm.controls.type.value === 'BUY' || transactionForm.controls.type.value === 'SELL') {
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <p-floatlabel variant="in">
+                <input id="tx-ticker" formControlName="ticker" pInputText fluid pSize="small" class="uppercase" />
+                <label for="tx-ticker">Ticker</label>
+            </p-floatlabel>
+
+            <p-floatlabel variant="in">
+                <p-inputNumber id="tx-shares" formControlName="shares" fluid mode="decimal" [minFractionDigits]="0"
+                    [maxFractionDigits]="6" pSize="small" />
+                <label for="tx-shares">Shares</label>
+            </p-floatlabel>
+
+            <p-floatlabel variant="in">
+                <p-inputNumber id="tx-price" formControlName="price" fluid mode="decimal" [minFractionDigits]="2"
+                    [maxFractionDigits]="6" pSize="small" />
+                <label for="tx-price">Price per share</label>
+            </p-floatlabel>
+
+            <p-floatlabel variant="in">
+                <p-inputNumber id="tx-fees" formControlName="fees" fluid mode="decimal" [minFractionDigits]="2"
+                    [maxFractionDigits]="2" pSize="small" />
+                <label for="tx-fees">Fees (optional)</label>
+            </p-floatlabel>
+        </div>
+        } @else {
+        <p-floatlabel variant="in">
+            <p-inputNumber id="tx-amount" formControlName="price" fluid mode="decimal" [minFractionDigits]="2"
+                [maxFractionDigits]="2" pSize="small" />
+            <label for="tx-amount">Amount</label>
+        </p-floatlabel>
+
+        @if (transactionForm.controls.type.value === 'DIVIDEND') {
+        <p-floatlabel variant="in">
+            <input id="tx-div-ticker" formControlName="ticker" pInputText fluid pSize="small" class="uppercase"
+                placeholder="e.g. AAPL" />
+            <label for="tx-div-ticker">Ticker (optional)</label>
+        </p-floatlabel>
+        }
+        }
+
+        <!-- Optional note (max 500 chars per API spec) -->
+        <p-floatlabel variant="in">
+            <textarea id="tx-note" formControlName="note" pTextarea fluid rows="2" class="text-sm resize-none"
+                maxlength="500"></textarea>
+            <label for="tx-note">Note (optional)</label>
+        </p-floatlabel>
+
+    </form>
+    } @else {
+    <div class="space-y-3">
+        <div
+            class="flex flex-col bg-primary-50 rounded-md p-3 border border-primary-100 font-mono text-[10px] text-primary-600 leading-relaxed overflow-x-auto">
+            <span class="font-bold text-primary-900 mb-1 block">Supported formats (space/tab separated):</span>
+            <span>BUY/SELL: TYPE "MY ENVELOPE" DD/MM/YYYY TICKER SHARES PRICE FEES</span>
+            <span>OTHERS: TYPE "MY ENVELOPE" DD/MM/YYYY AMOUNT</span>
+        </div>
+
+        <textarea pTextarea [formControl]="bulkPasteContent"
+            class="w-full font-mono text-xs p-3 border-primary-200 focus:border-primary-400" rows="8"
+            placeholder="Paste your transactions here…"></textarea>
+
+        @if (isParsingError()) {
+        <div
+            class="text-red-500 text-xs font-semibold bg-red-50 p-2 rounded border border-red-100 flex items-start gap-2">
+            <i class="pi pi-exclamation-triangle mt-0.5"></i>
+            <span>{{ isParsingError() }}</span>
+        </div>
+        }
+    </div>
+    }
+
+    <ng-template #footer>
+        <div class="flex justify-end gap-2">
+            <p-button label="Cancel" icon="pi pi-times" [text]="true" severity="secondary"
+                (onClick)="closeTransactionDialog()" [disabled]="isCreatingTransaction()" size="small" />
+            <p-button [label]="transactionMode() === 'form' ? 'Log' : 'Bulk Insert'" icon="pi pi-check"
+                (onClick)="createTransaction()" [loading]="isCreatingTransaction()"
+                [disabled]="(transactionMode() === 'form' && transactionForm.invalid) || (transactionMode() === 'paste' && !bulkPasteContent.value.trim())"
+                size="small" />
+        </div>
+    </ng-template>
+</p-dialog>
+
+
+<!-- ── Ticker browser (command-palette style) ──────────────────────────────── -->
+@if (isTickerBrowserOpen()) {
+<div class="fixed inset-0 z-50 flex items-start justify-center pt-[72px] px-4 pb-4"
+    style="background: rgba(15,23,42,0.4); backdrop-filter: blur(2px); animation: paletteBackdropIn 0.15s ease;"
+    (click)="onBackdropClick()" (keydown.escape)="closeTickerBrowser()">
+
+    <div class="bg-white w-full max-w-[520px] rounded-[14px] border border-primary-200 overflow-hidden"
+        style="box-shadow: 0 8px 40px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06); animation: paletteSlideIn 0.18s cubic-bezier(0.16,1,0.3,1);"
+        (click)="$event.stopPropagation()" role="dialog" aria-modal="true" aria-label="Search tickers">
+
+        <!-- Search row -->
+        <div class="flex items-center gap-2.5 px-4 py-3.5 border-b border-primary-100">
+            <i class="pi pi-search text-primary-300 text-sm shrink-0"></i>
+            <input #tickerSearchInput [ngModel]="tickerQuery()" (ngModelChange)="onTickerQueryChange($event)"
+                placeholder="Search ticker or company name…" autocomplete="off" spellcheck="false"
+                class="flex-1 border-none outline-none bg-transparent text-[15px] font-medium text-primary-900 placeholder:text-primary-300 placeholder:font-normal caret-blue-500" />
+            <span
+                class="text-[9px] font-semibold text-primary-400 bg-primary-50 border border-primary-100 rounded px-1.5 py-0.5 font-mono">esc</span>
+        </div>
+
+        <!-- Results -->
+        <div class="max-h-[360px] overflow-y-auto">
+            @if (isSearchingTickers()) {
+            <div class="flex items-center gap-3 px-4 py-3.5">
+                <i class="pi pi-spin pi-spinner text-primary-300 text-sm"></i>
+                <span class="text-xs text-primary-400">Searching…</span>
+            </div>
+            } @else if (tickerSearchResults().length > 0) {
+            <p class="px-4 pt-2.5 pb-1 text-[9px] font-bold uppercase tracking-[0.14em] text-primary-300">
+                {{ tickerSearchResults().length }} result{{ tickerSearchResults().length !== 1 ? 's' : '' }} for "{{
+                tickerQuery() }}"
+            </p>
+            @for (item of tickerSearchResults(); track item.ticker; let i = $index) {
+            <div class="group relative flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors duration-100"
+                [class.bg-primary-50]="activePaletteIdx() === i" (click)="addToWatchlist(item.ticker)"
+                (mouseenter)="activePaletteIdx.set(i)">
+
+                @if (activePaletteIdx() === i) {
+                <div class="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-blue-500 rounded-r-sm"></div>
+                }
+
+                <!-- Ticker badge -->
+                <span
+                    class="text-[11px] font-black font-mono text-primary-900 bg-primary-50 border border-primary-100 rounded-md px-1.5 py-1 min-w-[52px] text-center tracking-wide shrink-0">
+                    {{ item.ticker }}
+                </span>
+
+                <!-- Name + exchange + quote type -->
+                <div class="flex flex-col flex-1 min-w-0">
+                    <p class="text-xs font-semibold text-primary-900 truncate leading-snug">{{ item.name }}</p>
+                    <p class="text-[10px] text-primary-400 truncate">
+                        {{ item.exchange ?? '—' }} · {{ item.quote_type }}
+                    </p>
+                </div>
+
+                <!-- Price + change (item.value / item.change_1d_pct per TickerSearchResult) -->
+                <div class="text-right shrink-0">
+                    <p class="text-xs font-bold font-mono text-primary-900">
+                        {{ item.value | number:'1.2-2' }}
+                        <span class="text-[9px] font-sans">{{ item.currency }}</span>
+                    </p>
+                    <p class="text-[10px] font-semibold font-mono"
+                        [class]="item.change_1d_pct >= 0 ? 'text-emerald-500' : 'text-red-400'">
+                        {{ item.change_1d_pct >= 0 ? '+' : '' }}{{ item.change_1d_pct | number:'1.2-2' }}%
+                    </p>
+                </div>
+
+                <!-- Add / Added — toggle add↔remove -->
+                <button
+                    class="text-[9px] font-bold uppercase tracking-wide shrink-0 border rounded-md px-2 py-1 transition-all duration-150 cursor-pointer"
+                    [class]="isInWatchlist(item.ticker)
+                        ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200'
+                        : 'border-primary-200 text-primary-500 hover:bg-primary-900 hover:text-white hover:border-primary-900'"
+                    (click)="$event.stopPropagation(); isInWatchlist(item.ticker) ? removeFromWatchlist(item.ticker) : addToWatchlist(item.ticker)">
+                    {{ isInWatchlist(item.ticker) ? '✓ Added' : '+ Add' }}
+                </button>
+            </div>
+            }
+            } @else if (tickerQuery()) {
+            <div class="py-10 text-center">
+                <p class="text-sm font-semibold text-primary-900">No results for "{{ tickerQuery() }}"</p>
+                <p class="text-xs text-primary-400 mt-1">Try a different symbol or company name.</p>
+            </div>
+            } @else {
+            @for (item of trending(); track item.ticker; let i = $index) {
+            <div class="group relative flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors duration-100"
+                [class.bg-primary-50]="activePaletteIdx() === i" (click)="addToWatchlist(item.ticker)"
+                (mouseenter)="activePaletteIdx.set(i)">
+
+                @if (activePaletteIdx() === i) {
+                <div class="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-blue-500 rounded-r-sm"></div>
+                }
+
+                <!-- Ticker chart -->
+                <div class="h-6">
+                    <svg class="w-full h-full" viewBox="0 0 50 18" preserveAspectRatio="none" aria-hidden="true">
+                        <defs>
+                            <linearGradient [attr.id]="'sg-' + item.ticker" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" [attr.stop-color]="item.change_1d >= 0 ? '#10b981' : '#ef4444'"
+                                    stop-opacity="0.15" />
+                                <stop offset="100%" [attr.stop-color]="item.change_1d >= 0 ? '#10b981' : '#ef4444'"
+                                    stop-opacity="0" />
+                            </linearGradient>
+                        </defs>
+                        <path [attr.d]="sparklinePath(item.history_7d, true, 50, 18, 0)"
+                            [attr.fill]="'url(#sg-' + item.ticker + ')'" />
+                        <path [attr.d]="sparklinePath(item.history_7d, false, 50, 18, 0)" fill="none"
+                            [attr.stroke]="item.change_1d >= 0 ? '#10b981' : '#ef4444'" stroke-width="1.5"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </div>
+
+                <!-- Name + exchange + quote type -->
+                <div class="flex flex-col flex-1 min-w-0">
+                    <p class="text-xs font-semibold text-primary-900 truncate leading-snug">{{ item.ticker }}</p>
+                    <p class="text-[10px] text-primary-400 truncate">
+                        {{ item.name }}
+                    </p>
+                </div>
+
+                <!-- Price + change (item.value / item.change_1d_pct per TickerSearchResult) -->
+                <div class="text-right shrink-0">
+                    <p class="text-xs font-bold font-mono text-primary-900">
+                        {{ item.current_price| number:'1.2-2' }}
+                        <span class="text-[9px] font-sans">{{ item.currency }}</span>
+                    </p>
+                    <p class="text-[10px] font-semibold font-mono"
+                        [class]="item.change_1d_pct >= 0 ? 'text-emerald-500' : 'text-red-400'">
+                        {{ item.change_1d_pct >= 0 ? '+' : '' }}{{ item.change_1d_pct | number:'1.2-2' }}%
+                    </p>
+                </div>
+
+                <!-- Add / Added — toggle add↔remove -->
+                <button
+                    class="text-[9px] font-bold uppercase tracking-wide shrink-0 border rounded-md px-2 py-1 transition-all duration-150 cursor-pointer"
+                    [class]="isInWatchlist(item.ticker)
+                        ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200'
+                        : 'border-primary-200 text-primary-500 hover:bg-primary-900 hover:text-white hover:border-primary-900'"
+                    (click)="$event.stopPropagation(); isInWatchlist(item.ticker) ? removeFromWatchlist(item.ticker) : addToWatchlist(item.ticker)">
+                    {{ isInWatchlist(item.ticker) ? '✓ Added' : '+ Add' }}
+                </button>
+            </div>
+            }
+            }
+        </div>
+    </div>
+</div>
+}
