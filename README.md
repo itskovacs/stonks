@@ -12,20 +12,24 @@
 <div align="center">
 
 ![Stonks](./.github/sc_dashboard.png)
-*Dashboard with mocked data, available in [demo](https://itskovacs-stonks.netlify.app/)*
+*Demo Dashboard with mocked data, available in [demo](https://itskovacs-stonks.netlify.app/)*
 
 </div>
 
 
-## Stonks?
+## Introduction
 
-Stonks is a minimalist personal portfolio tracker built around one idea: **less is more**.
+Stonks is a minimalist personal portfolio tracker.
 
-No broker integrations, no algorithmic trading. You add your trades and get clean data back for your portfolio: current prices, unrealized gains, allocation breakdowns, and a basic stock analysis page for any ticker you want to research.
+It focuses on one thing: it tells you where your money is and how it's doing, with just enough market data (and pseudo-computed scores) to make informed decisions without overwhelming you. No broker integrations, no algorithmic trading.
 
-It does one thing and does it well: it tells you where your money is and how it's doing, with just enough market data (and pseudo-computed scores) to make informed decisions without overwhelming you.
+1. **Create an _Envelope_** (*Investment*, *Broker X*, *CTO*, etc.)
+2. **Log Transactions** (*BUY*, *SELL*, *DEPOSIT*, *WITHDRAW*, *DIVIDEND*). *Tip: use batch mode for faster entry.*
+3. **View Portfolio Insights**: Get clear data on your allocation, current prices, unrealized PnL, and equity charts over time.
 
-No telemetry. No tracking. No ads. Free, forever.
+You can also browse and add any ticker you want to follow.
+
+No telemetry. No tracking. No ads. Data from Yahoo Finance.
 
 > [!IMPORTANT]
 > **Keep in mind that this app is strictly for education, not financial advice. Investing involves risk, so always do your own research and invest responsibly!**
