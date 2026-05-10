@@ -58,6 +58,8 @@ docker pull ghcr.io/itskovacs/stonks:1
 docker run -d -p 8080:8000 -v ./storage:/app/storage ghcr.io/itskovacs/stonks:1
 ```
 
+> [!NOTE]
+> Config can be modified in `storage/config.env` (`SECRET_KEY`, `REGISTER_ENABLE`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_MINUTES`)
 
 ## 📸 Demo <a name = "demo"></a>
 
