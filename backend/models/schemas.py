@@ -5,11 +5,11 @@ All API request/response shapes (pure Pydantic, no SQLAlchemy).
 Database models live in models/models.py.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 # =============================================================================
 # ENUMS
@@ -40,6 +40,10 @@ class LoginRegisterModel(BaseModel):
         StringConstraints(min_length=1, max_length=19, pattern=r"^[a-zA-Z0-9_-]+$"),
     ]
     password: str
+
+
+class AuthParams(BaseModel):
+    register_enabled: bool
 
 
 # =============================================================================
@@ -93,13 +97,68 @@ class TransactionRequest(BaseModel):
 
 
 # =============================================================================
+# USER SETTINGS
+# =============================================================================
+
+
+class UserSettingsRequest(BaseModel):
+    currency: str | None = Field(default=None, min_length=1, max_length=10, description="Currency symbol, e.g. €, $, £")
+    apprise_url: str | None = Field(default=None, description="Comma-separated Apprise notification URLs")
+
+
+class UserSettingsOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    currency: str | None
+    apprise_url: str | None
+
+
+# =============================================================================
+# ALERTS
+# =============================================================================
+
+
+class AlertRequest(BaseModel):
+    ticker: str = Field(min_length=1, max_length=20)
+    target_price: float = Field(gt=0)
+    trigger_above: bool
+
+    @field_validator("ticker")
+    @classmethod
+    def normalize_ticker(cls, v: str) -> str:
+        return v.strip().upper()
+
+
+class AlertUpdateRequest(BaseModel):
+    target_price: float | None = Field(default=None, gt=0)
+    trigger_above: bool | None = None
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> "AlertUpdateRequest":
+        if self.target_price is None and self.trigger_above is None:
+            raise ValueError("Provide at least one of: target_price, trigger_above")
+        return self
+
+
+class AlertOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    ticker: str
+    target_price: float
+    trigger_above: bool
+    is_armed: bool
+    last_triggered: date | None
+
+
+# =============================================================================
 # STOCK REPORT — SUB-MODELS
 # =============================================================================
 
 
 class StockBar(BaseModel):
     ticker: str
-    company_name: str
+    name: str
     sector: str
     industry: str
     current_price: float
@@ -116,6 +175,9 @@ class StockBar(BaseModel):
     rsi_14: float | None
     sma_50: float | None
     sma_200: float | None
+    pre_market_price: float | None = None
+    pre_market_change: float | None = None
+    pre_market_change_pct: float | None = None
 
 
 class RiskGauge(BaseModel):
@@ -352,6 +414,8 @@ class TransactionOut(BaseModel):
     total: float
     envelope_name: str
     note: str | None = None
+    realized_pnl: float | None = None
+    realized_pnl_pct: float | None = None
 
 
 class EnvelopeOut(BaseModel):
@@ -377,6 +441,9 @@ class WatchlistRow(BaseModel):
     sector: str | None
     currency: str
     history_7d: list[ClosePricePoint]
+    pre_market_price: float | None = None
+    pre_market_change: float | None = None
+    pre_market_change_pct: float | None = None
 
 
 class PositionRow(BaseModel):
@@ -408,6 +475,7 @@ class EnvelopeSummary(BaseModel):
     color: str
     cash_available: float
     total_value: float
+    capital_in: float  # SUM(DEPOSIT + DIVIDEND) − SUM(WITHDRAW), all-time, this envelope
 
 
 class DashboardTotals(BaseModel):
@@ -431,6 +499,7 @@ class DashboardResponse(BaseModel):
     envelopes: list[EnvelopeSummary]
     transactions: list[TransactionOut]
     totals: DashboardTotals
+    user_currency: str
 
 
 # =============================================================================
@@ -476,6 +545,8 @@ class EnvelopeOverviewResponse(BaseModel):
     series: list[EnvelopeSeriesLine]
     events: list[EnvelopeEvent]
     stats: EnvelopeStats
+    benchmark_pct: list[float | None] = []
+    portfolio_pct: list[float | None] = []
 
 
 # =============================================================================

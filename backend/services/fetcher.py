@@ -98,6 +98,10 @@ _TTL_HISTORY_SHORT    = 1    # intraday / very recent (1d, 5d period)
 _TTL_HISTORY_DAILY    = 4    # daily bars including today
 _TTL_HISTORY_HISTORIC = 24 * 90  # fixed past range — data never changes
 
+# Minimum key count for a yfinance info dict to be considered complete enough to cache.
+# Degraded / soft-rate-limited responses typically have 8–15 keys; real responses have 40+.
+_MIN_INFO_KEYS = 25
+
 
 def _ttl_history(period: str, end_date: str | None) -> int:
     """
@@ -195,6 +199,30 @@ def _bootstrap_cache_db(path: str) -> None:
 
 
 _bootstrap_cache_db(DB_CACHE)
+
+# Entries expiring beyond this horizon are considered static historical data and
+# are preserved on a user-triggered cache reset (financials, balance sheet, etc.
+# carry a 90-day TTL; dynamic entries like info/recommendations are ≤ 24h).
+_CACHE_RESET_HORIZON_H = 48
+
+
+def clear_ticker_cache(ticker: str) -> None:
+    """
+    Deletes all dynamic cache entries for a ticker (TTL ≤ 24h).
+    Long-lived historical data (financials, balance sheet, cashflow, dividends,
+    splits — 90-day TTL) is intentionally preserved.
+    """
+    try:
+        conn = _get_conn()
+        cutoff = _exp_ts(_CACHE_RESET_HORIZON_H)
+        conn.execute(
+            "DELETE FROM yf_cache WHERE ticker = ? AND expiration < ?",
+            (ticker, cutoff),
+        )
+        conn.commit()
+        log.debug("cache CLEAR [%s] — dynamic entries deleted (static historical preserved)", ticker)
+    except Exception as exc:
+        log.warning("Cache clear error [%s]: %s", ticker, exc)
 
 
 # ── Thread-local resource pool ────────────────────────────────────────────────
@@ -310,14 +338,18 @@ class YFinanceFetcher:
         """
         try:
             conn = _get_conn()
+            now = _now_ts()
             row = conn.execute(
-                "SELECT type_tag, data FROM yf_cache "
+                "SELECT type_tag, data, expiration FROM yf_cache "
                 "WHERE ticker = ? AND method = ? AND expiration > ?",
-                (self.ticker, method, _now_ts()),
+                (self.ticker, method, now),
             ).fetchone()
             if row is None:
+                log.debug("cache MISS  [%s/%s]", self.ticker, method)
                 return False, None
-            type_tag, blob = row
+            type_tag, blob, expiration = row
+            remaining_h = (expiration - now) / 3600
+            log.debug("cache HIT   [%s/%s] — %.1fh remaining", self.ticker, method, remaining_h)
             return True, _deserialize(bytes(blob) if blob is not None else None, type_tag)
         except Exception as exc:
             log.warning("Cache read error [%s/%s]: %s", self.ticker, method, exc)
@@ -338,6 +370,7 @@ class YFinanceFetcher:
                     "VALUES (?, ?, ?, 'empty', NULL)",
                     (self.ticker, method, _exp_ts(expire_hours)),
                 )
+                log.debug("cache WRITE [%s/%s] — sentinel (empty), ttl %dh", self.ticker, method, expire_hours)
             else:
                 blob, type_tag = _serialize(data)
                 conn.execute(
@@ -345,6 +378,7 @@ class YFinanceFetcher:
                     "VALUES (?, ?, ?, ?, ?)",
                     (self.ticker, method, _exp_ts(expire_hours), type_tag, blob),
                 )
+                log.debug("cache WRITE [%s/%s] — ttl %dh", self.ticker, method, expire_hours)
             conn.commit()
         except Exception as exc:
             log.warning("Cache write error [%s/%s]: %s", self.ticker, method, exc)
@@ -361,7 +395,10 @@ class YFinanceFetcher:
         try:
             raw = self.yf.info
             result = dict(raw) if raw else {}
-            self._set_cache("info", result, expire_hours=_ttl("info"))
+            if len(result) >= _MIN_INFO_KEYS:
+                self._set_cache("info", result, expire_hours=_ttl("info"))
+            else:
+                log.warning("Partial info response [%s] — %d keys, skipping cache", self.ticker, len(result))
             self._info_cache = result
         except YFRateLimitError:
             log.warning("Rate limited fetching info [%s]", self.ticker)

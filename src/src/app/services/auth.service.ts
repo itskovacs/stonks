@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { Observable, ReplaySubject, tap } from 'rxjs';
 import { ApiService } from './api.service';
 import { UtilsService } from './utils.service';
-import { Token } from '../int';
+import { AuthParams, Token } from '../int';
 
 // ---------------------------------------------------------------------------
 // Storage keys — single source of truth for the entire auth layer.
@@ -53,6 +53,10 @@ export class AuthService {
     }
     set loggedUser(user: string) {
         localStorage.setItem(STORAGE_KEYS.USERNAME, user);
+    }
+
+    authParams(): Observable<AuthParams> {
+        return this.http.get<AuthParams>(this.apiBaseUrl + '/auth/params');
     }
 
     storeTokens(tokens: Token): void {

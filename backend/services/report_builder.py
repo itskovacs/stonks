@@ -53,23 +53,6 @@ from services.technical import compute_signals
 log = logging.getLogger(__name__)
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-
-def _safe_int(val: object) -> int | None:
-    if val is None:
-        return None
-    try:
-        if pd.isna(val):  # type: ignore[arg-type]
-            return None
-    except (TypeError, ValueError):
-        pass
-    try:
-        return int(val)
-    except (TypeError, ValueError):
-        return None
-
-
 # ── Formatting helpers ────────────────────────────────────────────────────────
 
 
@@ -102,9 +85,16 @@ def _safe_float(v: object) -> float | None:
         return None
 
 
-def _safe_int(v: object) -> int | None:
+def _safe_int(val: object) -> int | None:
+    if val is None:
+        return None
     try:
-        return int(v)  # type: ignore[arg-type]
+        if pd.isna(val):  # type: ignore[arg-type]
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        return int(val)
     except (TypeError, ValueError):
         return None
 
@@ -295,9 +285,13 @@ def _build_stock_bar(f: YFinanceFetcher, hist: pd.DataFrame, signals: dict) -> d
     sma_50 = sma_raw.get("sma_50") if isinstance(sma_raw, dict) else None
     sma_200 = sma_raw.get("sma_200") if isinstance(sma_raw, dict) else None
 
+    pre_price = _safe_float(info.get("preMarketPrice"))
+    pre_chg   = round(pre_price - prev, 4) if (pre_price and prev) else None
+    pre_pct   = round(pre_chg / prev * 100, 2) if (pre_chg is not None and prev) else None
+
     return {
         "ticker":              f.ticker,
-        "company_name":        info.get("longName") or info.get("shortName") or f.ticker,
+        "name":        info.get("longName") or info.get("shortName") or f.ticker,
         "sector":              info.get("sector", "Unknown"),
         "industry":            info.get("industry", "Unknown"),
         "current_price":       current or 0.0,
@@ -310,10 +304,13 @@ def _build_stock_bar(f: YFinanceFetcher, hist: pd.DataFrame, signals: dict) -> d
         "fifty_two_week_high": _safe_float(info.get("fiftyTwoWeekHigh")),
         "fifty_two_week_low":  _safe_float(info.get("fiftyTwoWeekLow")),
         "beta":                _safe_float(info.get("beta")),
-        "currency":            info.get("currency", "USD"),
-        "rsi_14":              rsi_14,
-        "sma_50":              sma_50,
-        "sma_200":             sma_200,
+        "currency":              info.get("currency", "USD"),
+        "rsi_14":                rsi_14,
+        "sma_50":                sma_50,
+        "sma_200":               sma_200,
+        "pre_market_price":      pre_price,
+        "pre_market_change":     pre_chg,
+        "pre_market_change_pct": pre_pct,
     }
 
 
@@ -370,8 +367,8 @@ def _build_price_chart(f: YFinanceFetcher, hist: pd.DataFrame) -> dict:
         hi_idx = hist["High"].idxmax()
         lo_idx = hist["Low"].idxmin()
         annotations += [
-            {"date": str(hi_idx.date()), "label": f"High: {hist["High"][hi_idx]:.2f} {currency}", "type": "high"},
-            {"date": str(lo_idx.date()), "label": f"Low: {hist["Low"][lo_idx]:.2f} {currency}",  "type": "low"},
+            {"date": str(hi_idx.date()), "label": f"High: {hist['High'][hi_idx]:.2f} {currency}", "type": "high"},
+            {"date": str(lo_idx.date()), "label": f"Low: {hist['Low'][lo_idx]:.2f} {currency}",  "type": "low"},
         ]
 
     def _strip_tz(ts: object) -> pd.Timestamp:
@@ -693,6 +690,11 @@ def _build_rating_verdict(f: YFinanceFetcher, signals: dict, total_score: float)
     info = f.info()
     current = _safe_float(info.get("currentPrice") or info.get("regularMarketPrice"))
     target = _safe_float(info.get("targetMeanPrice"))
+    if target is None:
+        try:
+            target = _safe_float(f.analyst_price_targets().get("mean"))
+        except Exception:
+            pass
     upside = ((target - current) / current * 100) if (target and current) else None
 
     rec = info.get("recommendationKey") or info.get("recommendation") or ""
@@ -728,11 +730,22 @@ def _build_rating_verdict(f: YFinanceFetcher, signals: dict, total_score: float)
     except Exception as exc:
         log.warning("Analyst breakdown parse error [%s]: %s", f.ticker, exc)
 
-    signal_bars = [
-        {"label": "BUY",  "pct": signals.get("buy_pct", 33),  "color": "#10B981"},
-        {"label": "HOLD", "pct": signals.get("hold_pct", 34), "color": "#F59E0B"},
-        {"label": "SELL", "pct": signals.get("sell_pct", 33), "color": "#EF4444"},
-    ]
+    if analyst_breakdown:
+        total_a = analyst_breakdown["total"]
+        buy_a  = round((analyst_breakdown["strong_buy"] + analyst_breakdown["buy"]) / total_a * 100)
+        hold_a = round(analyst_breakdown["hold"] / total_a * 100)
+        sell_a = 100 - buy_a - hold_a
+        signal_bars = [
+            {"label": "BUY",  "pct": buy_a,  "color": "#10B981"},
+            {"label": "HOLD", "pct": hold_a, "color": "#F59E0B"},
+            {"label": "SELL", "pct": sell_a, "color": "#EF4444"},
+        ]
+    else:
+        signal_bars = [
+            {"label": "BUY",  "pct": signals.get("buy_pct", 33),  "color": "#10B981"},
+            {"label": "HOLD", "pct": signals.get("hold_pct", 34), "color": "#F59E0B"},
+            {"label": "SELL", "pct": signals.get("sell_pct", 33), "color": "#EF4444"},
+        ]
 
     if total_score >= 75 and upside is not None and upside > 15:
         verdict, confidence = (

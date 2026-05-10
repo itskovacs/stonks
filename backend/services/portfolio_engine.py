@@ -12,14 +12,15 @@ Transaction types
 -----------------
 BUY     — increases share count; increases cost basis
 SELL    — decreases share count; reduces cost basis proportionally (WAC)
-DEPOSIT / WITHDRAW / DIVIDEND — cash events; ignored by the position engine
+DEPOSIT / WITHDRAW / DIVIDEND — cash events; update the running cash balance
 
-Chart equity value
-------------------
-value(day) = Σ  shares_i × close_i(day)
+Chart value
+-----------
+value(day) = cash_balance + Σ  shares_i × close_i(day)
 
-Cash is NOT included in chart values — it is tracked separately
-via Envelope.cash_available in the database layer.
+Cash IS included in chart values so that unallocated proceeds after a SELL
+do not create gaps. The running cash balance is reconstructed from all
+five transaction types by _apply_tx.
 
 Pure price returns (stats)
 --------------------------
@@ -166,25 +167,77 @@ def compute_all_positions(txs: list[dict], envelopes: list[dict]) -> list[dict]:
     return result
 
 
+def compute_sell_pnl(txs: list[dict]) -> dict[int, dict]:
+    """
+    Returns {tx_id: {"realized_pnl": float, "realized_pnl_pct": float}}
+    for every SELL, using WAC at the moment of sale.
+    O(n) — call once per dashboard load alongside compute_all_positions.
+    """
+    holdings: dict[str, dict[str, dict[str, float]]] = {}
+    result: dict[int, dict] = {}
+
+    for tx in sorted(txs, key=lambda x: x["date"]):
+        if tx["type"] not in ("BUY", "SELL"):
+            continue
+        env_name = tx.get("envelope_name", "")
+        ticker   = (tx.get("ticker") or "").upper()
+        if not env_name or not ticker:
+            continue
+
+        shares = float(tx.get("shares") or 0.0)
+        total  = float(tx.get("total")  or 0.0)
+
+        if env_name not in holdings:
+            holdings[env_name] = {}
+        if ticker not in holdings[env_name]:
+            holdings[env_name][ticker] = {"shares": 0.0, "cost_basis": 0.0}
+
+        h = holdings[env_name][ticker]
+        if tx["type"] == "BUY":
+            h["shares"]     += shares
+            h["cost_basis"] += total
+        else:
+            if h["shares"] > 1e-9 and tx.get("id") is not None:
+                wac              = h["cost_basis"] / h["shares"]
+                cost_of_sale     = round(wac * shares, 2)
+                realized_pnl     = round(total - cost_of_sale, 2)
+                realized_pnl_pct = round(realized_pnl / cost_of_sale * 100, 2) if cost_of_sale else 0.0
+                result[tx["id"]] = {"realized_pnl": realized_pnl, "realized_pnl_pct": realized_pnl_pct}
+            sell_ratio       = min(shares / h["shares"], 1.0) if h["shares"] > 1e-9 else 0.0
+            h["cost_basis"] -= h["cost_basis"] * sell_ratio
+            h["shares"]      = max(h["shares"] - shares, 0.0)
+
+    return result
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def _apply_tx(holdings: dict[str, float], tx: dict[str, Any]) -> None:
-    """Applies a single BUY or SELL to an equity-holdings dict in-place."""
-    if tx["type"] not in ("BUY", "SELL"):
-        return
-    ticker = (tx.get("ticker") or "").upper()
-    shares = float(tx.get("shares") or 0.0)
-    if tx["type"] == "BUY":
-        holdings[ticker] = holdings.get(ticker, 0.0) + shares
-    else:
+    """Applies a single transaction to an envelope holdings dict in-place."""
+    total  = float(tx.get("total") or 0.0)
+    tx_type = tx["type"]
+    if tx_type in ("DEPOSIT", "DIVIDEND"):
+        holdings["__cash__"] = holdings.get("__cash__", 0.0) + total
+    elif tx_type == "WITHDRAW":
+        holdings["__cash__"] = holdings.get("__cash__", 0.0) - total
+    elif tx_type == "BUY":
+        ticker = (tx.get("ticker") or "").upper()
+        shares = float(tx.get("shares") or 0.0)
+        holdings[ticker]     = holdings.get(ticker, 0.0) + shares
+        holdings["__cash__"] = holdings.get("__cash__", 0.0) - total
+    elif tx_type == "SELL":
+        ticker = (tx.get("ticker") or "").upper()
+        shares = float(tx.get("shares") or 0.0)
         remaining = holdings.get(ticker, 0.0) - shares
         if remaining > 1e-9:
             holdings[ticker] = remaining
         else:
             holdings.pop(ticker, None)
+        holdings["__cash__"] = holdings.get("__cash__", 0.0) + total
+
 
 
 def _envelope_value(
@@ -196,9 +249,9 @@ def _envelope_value(
     Mark-to-market equity value for one envelope on a given day.
     Uses the last known close on or before `day` to bridge weekends and gaps.
     """
-    total = 0.0
+    total = holdings.get("__cash__", 0.0)
     for ticker, shares in holdings.items():
-        if shares < 1e-9 or closes.empty or ticker not in closes.columns:
+        if ticker == "__cash__" or shares < 1e-9 or closes.empty or ticker not in closes.columns:
             continue
         col_slice = closes[ticker].loc[:day].dropna()
         if col_slice.empty:
@@ -214,10 +267,11 @@ def _pure_price_change(
     day: pd.Timestamp,
     prev_day: pd.Timestamp,
 ) -> tuple[float, float]:
-    """Returns (abs_price_change, prev_total) for pure-return daily stats."""
+    """Returns (abs_price_change, prev_equity) for pure-return daily stats."""
     prev_total  = sum(_envelope_value(pre_trade_holdings[n], closes, prev_day) for n in envelope_names)
     today_total = sum(_envelope_value(pre_trade_holdings[n], closes, day)      for n in envelope_names)
-    return today_total - prev_total, prev_total
+    cash_total  = sum(pre_trade_holdings[n].get("__cash__", 0.0) for n in envelope_names)
+    return today_total - prev_total, prev_total - cash_total
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -336,8 +390,10 @@ def compute_envelope_overview(
     """
     Reconstructs daily mark-to-market equity values for the requested period.
 
-    DEPOSIT / WITHDRAW / DIVIDEND do NOT contribute to chart equity values.
-    Only BUY / SELL transactions mutate the holdings state tracked here.
+    All five transaction types mutate the per-envelope state: BUY/SELL update
+    share counts; DEPOSIT/DIVIDEND/WITHDRAW update the cash balance. Chart
+    values include both equity and cash so that post-SELL periods show
+    unallocated proceeds rather than a gap.
 
     Non-trading-day transactions are applied on the next market session.
     """
@@ -367,7 +423,8 @@ def compute_envelope_overview(
     }
 
     if not txs:
-        return {"period": period, "dates": [], "series": [], "events": [], "stats": empty_stats}
+        return {"period": period, "dates": [], "series": [], "events": [], "stats": empty_stats,
+                "benchmark_pct": [], "portfolio_pct": []}
 
     sorted_txs    = sorted(txs, key=lambda x: x["date"])
     envelope_names = [env["name"] for env in envelopes]
@@ -378,28 +435,88 @@ def compute_envelope_overview(
         if tx.get("ticker") and tx["ticker"].strip() and tx["type"] in ("BUY", "SELL")
     })
 
-    closes = _fetch_closes(equity_tickers, start=chart_start_str, end=end_str)
+    # Fetch equity tickers and WPEA.PA benchmark in one parallel pool.
+    # WPEA.PA is fetched from the user's first-ever capital transaction so that
+    # the pre-window mirror replay has prices for all historical deposits.
+    _BENCHMARK = "WPEA.PA"
+    _capital_types = {"DEPOSIT", "DIVIDEND", "WITHDRAW"}
+    first_capital_str = next(
+        (tx["date"][:10] for tx in sorted_txs if tx["type"] in _capital_types),
+        chart_start_str,
+    )
+    all_fetch_tickers = equity_tickers + [_BENCHMARK]
+    equity_frames: dict[str, pd.Series] = {}
+    wpea_col: pd.Series | None = None
 
-    # Replay all transactions BEFORE the window to build opening state
+    with ThreadPoolExecutor(max_workers=min(_MAX_FETCH_WORKERS, len(all_fetch_tickers))) as executor:
+        futures = {
+            executor.submit(
+                _fetch_one_ticker, t,
+                first_capital_str if t == _BENCHMARK else chart_start_str,
+                end_str,
+            ): t
+            for t in all_fetch_tickers
+        }
+        for future in as_completed(futures):
+            ticker, series = future.result()
+            if series is not None:
+                if ticker == _BENCHMARK:
+                    wpea_col = series
+                else:
+                    equity_frames[ticker] = series
+
+    # Retry equity tickers that failed in the parallel fetch.  Transient errors
+    # (connection reset, rate-limit inside the threadpool) are not cached by
+    # YFinanceFetcher, so a sequential second attempt usually recovers them.
+    missing_equity = [t for t in equity_tickers if t not in equity_frames]
+    if missing_equity:
+        log.warning("Price fetch failed for %s in parallel pool — retrying sequentially", missing_equity)
+        for t in missing_equity:
+            _, series = _fetch_one_ticker(t, chart_start_str, end_str)
+            if series is not None:
+                equity_frames[t] = series
+            else:
+                log.warning(
+                    "No price data for %s after retry — held positions will be valued at $0 in the chart",
+                    t,
+                )
+
+    closes = pd.DataFrame(equity_frames).bfill().ffill() if equity_frames else pd.DataFrame()
+
+    # If the user holds WPEA.PA as an equity position, inject it into closes
+    # aligned to the existing trading-day index so the Euronext calendar does
+    # not pollute trading_days with Paris-only market days.
+    if wpea_col is not None and _BENCHMARK in equity_tickers and not closes.empty:
+        closes[_BENCHMARK] = wpea_col.reindex(closes.index, method="ffill").bfill()
+
+    # Replay all transactions BEFORE the window to build opening state.
+    # sorted_txs is already in full-datetime (insertion) order — slicing it
+    # directly is a faithful replay of the ORM ledger.  No priority override
+    # is needed: floors have been removed from _apply_tx so same-day ordering
+    # no longer affects the end-of-day cash balance.
     state: dict[str, dict[str, float]] = {name: {} for name in envelope_names}
-    for tx in sorted_txs:
-        if tx["date"][:10] >= chart_start_str:
-            break
+    pre_window = [tx for tx in sorted_txs if tx["date"][:10] < chart_start_str]
+    for tx in pre_window:
         env_name = tx.get("envelope_name")
         if env_name in state:
             _apply_tx(state[env_name], tx)
 
-    # In-window transactions: cash events before equity trades on same day
-    in_window = sorted(
-        [tx for tx in sorted_txs if tx["date"][:10] >= chart_start_str],
-        key=lambda x: (x["date"][:10], 0 if x["type"] in ("DEPOSIT", "WITHDRAW", "DIVIDEND") else 1),
-    )
+    # In-window transactions in insertion order; same rationale as pre_window.
+    in_window = [tx for tx in sorted_txs if tx["date"][:10] >= chart_start_str]
     pending_idx = 0
     n_pending   = len(in_window)
 
     trading_days = closes.index if not closes.empty else pd.bdate_range(
         start=chart_start_str, end=str(today)
     )
+    # Extend to today when market data has not yet settled (intraday / after-hours).
+    # Transactions entered today become visible immediately; _envelope_value bridges
+    # the missing close via .loc[:day], returning the last known price.
+    # weekday() < 5 is a calendar heuristic consistent with the rest of this file —
+    # exchange holidays will produce a zero-change today entry, which is harmless.
+    today_ts = pd.Timestamp(today)
+    if not closes.empty and today.weekday() < 5 and closes.index[-1] < today_ts:
+        trading_days = trading_days.union(pd.DatetimeIndex([today_ts]))
 
     dates: list[str]                     = []
     series_data: dict[str, list[float]]  = {name: [] for name in envelope_names}
@@ -448,4 +565,88 @@ def compute_envelope_overview(
     ]
     stats = _compute_stats(daily_pure_changes, txs, envelopes, chart_start_str, period_days)
 
-    return {"period": period, "dates": dates, "series": series, "events": events, "stats": stats}
+    # Benchmark: cash-flow mirror comparison vs WPEA.PA.
+    # For every DEPOSIT/DIVIDEND the user recorded, the mirror hypothetically buys
+    # that same amount of WPEA.PA at the day's price.  WITHDRAW reduces the mirror
+    # proportionally.  Both portfolio_pct and benchmark_pct are then expressed as
+    # % return on net capital deployed (capital_in = DEPOSIT + DIVIDEND - WITHDRAW),
+    # giving a true apples-to-apples comparison for a DCA investor.
+    benchmark_pct: list[float | None] = []
+    portfolio_pct: list[float | None] = []
+
+    if wpea_col is not None and dates:
+        total_values = [
+            sum(series_data[n][i] for n in envelope_names)
+            for i in range(len(dates))
+        ]
+
+        _INFLOW  = {"DEPOSIT", "DIVIDEND"}
+        _OUTFLOW = {"WITHDRAW"}
+
+        # Step 1 — replay pre-window capital flows to build opening mirror state
+        mirror_shares: float     = 0.0
+        cumulative_capital: float = 0.0
+
+        for tx in sorted_txs:
+            if tx["date"][:10] >= chart_start_str:
+                break
+            if tx["type"] not in (_INFLOW | _OUTFLOW):
+                continue
+            amount = float(tx.get("total") or 0.0)
+            wpea_at_tx = wpea_col.loc[:pd.Timestamp(tx["date"][:10])].dropna()
+            if wpea_at_tx.empty:
+                continue
+            price = float(wpea_at_tx.iloc[-1])
+            if tx["type"] in _INFLOW:
+                mirror_shares      += amount / price
+                cumulative_capital += amount
+            else:
+                mirror_shares      = max(mirror_shares - amount / price, 0.0)
+                cumulative_capital = max(cumulative_capital - amount, 0.0)
+
+        # Step 2 — walk chart window, snapshotting mirror state at each trading day
+        in_window_capital = [
+            tx for tx in sorted_txs
+            if tx["date"][:10] >= chart_start_str
+            and tx["type"] in (_INFLOW | _OUTFLOW)
+        ]
+        cf_idx = 0
+
+        mirror_shares_per_day: list[float] = []
+        capital_per_day: list[float]       = []
+
+        for day_str in dates:
+            while cf_idx < len(in_window_capital) and in_window_capital[cf_idx]["date"][:10] <= day_str:
+                tx     = in_window_capital[cf_idx]
+                amount = float(tx.get("total") or 0.0)
+                wpea_at_tx = wpea_col.loc[:pd.Timestamp(tx["date"][:10])].dropna()
+                if not wpea_at_tx.empty:
+                    price = float(wpea_at_tx.iloc[-1])
+                    if tx["type"] in _INFLOW:
+                        mirror_shares      += amount / price
+                        cumulative_capital += amount
+                    else:
+                        mirror_shares      = max(mirror_shares - amount / price, 0.0)
+                        cumulative_capital = max(cumulative_capital - amount, 0.0)
+                cf_idx += 1
+            mirror_shares_per_day.append(mirror_shares)
+            capital_per_day.append(cumulative_capital)
+
+        # Step 3 — per-day percentages: both divided by the same capital_in denominator
+        for i, day_str in enumerate(dates):
+            cap = capital_per_day[i]
+            if cap < 1e-2:
+                benchmark_pct.append(None)
+                portfolio_pct.append(None)
+                continue
+            wpea_at_day = wpea_col.loc[:pd.Timestamp(day_str)].dropna()
+            if wpea_at_day.empty:
+                benchmark_pct.append(None)
+                portfolio_pct.append(None)
+                continue
+            mirror_val = mirror_shares_per_day[i] * float(wpea_at_day.iloc[-1])
+            benchmark_pct.append(round((mirror_val      / cap - 1) * 100, 4))
+            portfolio_pct.append(round((total_values[i] / cap - 1) * 100, 4))
+
+    return {"period": period, "dates": dates, "series": series, "events": events, "stats": stats,
+            "benchmark_pct": benchmark_pct, "portfolio_pct": portfolio_pct}

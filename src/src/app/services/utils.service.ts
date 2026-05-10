@@ -52,15 +52,20 @@ export class UtilsService {
 
     // ── Dark mode ─────────────────────────────────────────────────────────────
 
+    readonly darkMode = signal(false);
+
     /** Call once on app startup (e.g. in AppComponent.ngOnInit) to restore preference. */
     initDarkMode(): void {
         const saved = localStorage.getItem(DARK_MODE_KEY) === 'true';
-        if (saved) this.toggleDarkMode(true);
+        document.documentElement.classList.toggle('dark', saved);
+        this.darkMode.set(saved);
     }
 
-    toggleDarkMode(enabled: boolean): void {
-        localStorage.setItem(DARK_MODE_KEY, String(enabled));
-        document.documentElement.classList.toggle('dark', enabled);
+    toggleDarkMode(): void {
+        const enabled = localStorage.getItem(DARK_MODE_KEY) === 'true';
+        localStorage.setItem(DARK_MODE_KEY, String(!enabled));
+        document.documentElement.classList.toggle('dark', !enabled);
+        this.darkMode.set(!enabled);
     }
 
     // ── Loading overlay ───────────────────────────────────────────────────────

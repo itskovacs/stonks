@@ -18,7 +18,7 @@ Design principles
 • Naming convention applied to SQLModel.metadata for deterministic migrations.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import Index, MetaData, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
@@ -50,6 +50,8 @@ class User(SQLModel, table=True):
     username: str = Field(primary_key=True, max_length=50)
     hashed_password: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    currency: str | None
+    apprise_url: str | None = Field(default=None, description="Comma-separated Apprise URLs")
 
     watchlist_items: list["WatchlistItem"] = Relationship(
         back_populates="owner", cascade_delete=True
@@ -60,6 +62,25 @@ class User(SQLModel, table=True):
     transactions: list["Transaction"] = Relationship(
         back_populates="owner", cascade_delete=True
     )
+    alerts: list["Alert"] = Relationship(
+        back_populates="owner", cascade_delete=True
+    )
+
+
+# =============================================================================
+# ALERTS
+# =============================================================================
+
+class Alert(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    user: str = Field(foreign_key="user.username", ondelete="CASCADE", index=True)
+    ticker: str = Field(index=True)
+    target_price: float
+    trigger_above: bool
+    is_armed: bool = Field(default=True)
+    last_triggered: date | None = Field(default=None)
+
+    owner: User | None = Relationship(back_populates="alerts")
 
 
 # =============================================================================

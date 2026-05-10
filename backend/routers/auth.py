@@ -18,10 +18,15 @@ from fastapi import APIRouter, Body, HTTPException
 from config import get_settings
 from deps import SessionDep
 from models.models import User
-from models.schemas import LoginRegisterModel, Token
+from models.schemas import AuthParams, LoginRegisterModel, Token
 from security import create_access_token, create_tokens, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/params", response_model=AuthParams)
+async def auth_params() -> AuthParams:
+    return {"register_enabled": get_settings().REGISTER_ENABLE}
 
 
 @router.post("/login", response_model=Token)

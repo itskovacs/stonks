@@ -15,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from deps import SessionDep, get_current_username
 from models.models import Transaction, WatchlistItem
 from models.schemas import PriceChartResponse, StockReport
+from services.fetcher import clear_ticker_cache
 from services.portfolio_engine import compute_ticker_wac
 from services.report_builder import build_price_chart_for_period, build_report
 
@@ -82,6 +83,21 @@ async def get_stock_report(
     report["in_watchlist"]    = in_watchlist
     report["wac_by_envelope"] = wac_by_envelope
     return report
+
+
+@router.delete(
+    "/cache/{ticker}",
+    summary="Invalidate dynamic cached data for a ticker",
+    status_code=204,
+)
+async def invalidate_ticker_cache(
+    ticker: str,
+    current_user: Annotated[str, Depends(get_current_username)],
+) -> None:
+    t = ticker.strip().upper()
+    if not t:
+        raise HTTPException(status_code=422, detail="Ticker cannot be empty.")
+    await run_in_threadpool(clear_ticker_cache, t)
 
 
 @router.get(

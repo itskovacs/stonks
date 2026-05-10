@@ -1,7 +1,8 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { ToastModule } from 'primeng/toast';
 import { SupportComponent } from './shared/support';
+import { UtilsService } from './services/utils.service';
 
 @Component({
     selector: 'app-root',
@@ -10,4 +11,10 @@ import { SupportComponent } from './shared/support';
     templateUrl: './app.component.html',
     styleUrls: ['./app.component.scss'],
 })
-export class AppComponent {}
+export class AppComponent {
+    private utilsService = inject(UtilsService);
+
+    constructor() {
+        this.utilsService.initDarkMode();
+    }
+}

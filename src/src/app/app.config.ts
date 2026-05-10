@@ -7,6 +7,7 @@ import { TripThemePreset } from '../mytheme';
 import { MessageService } from 'primeng/api';
 import { authInterceptor } from './services/auth.interceptor';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { DialogService } from 'primeng/dynamicdialog';
 
 export const appConfig: ApplicationConfig = {
     providers: [
@@ -23,6 +24,7 @@ export const appConfig: ApplicationConfig = {
             },
         }),
         MessageService,
+        DialogService,
         provideServiceWorker('ngsw-worker.js', {
             enabled: !isDevMode(),
             registrationStrategy: 'registerWhenStable:30000',

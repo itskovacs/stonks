@@ -1,4 +1,14 @@
-import { Component, computed, DestroyRef, effect, ElementRef, inject, signal, viewChild } from '@angular/core';
+import {
+    Component,
+    computed,
+    DestroyRef,
+    effect,
+    ElementRef,
+    inject,
+    linkedSignal,
+    signal,
+    viewChild,
+} from '@angular/core';
 import { DecimalPipe, DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
@@ -7,6 +17,7 @@ import {
     BehaviorSubject,
     combineLatest,
     concatMap,
+    debounceTime,
     forkJoin,
     from,
     startWith,
@@ -28,9 +39,11 @@ import { InputNumberModule } from 'primeng/inputnumber';
 import { TextareaModule } from 'primeng/textarea';
 import { TableModule } from 'primeng/table';
 import { SelectButtonModule } from 'primeng/selectbutton';
+import { MultiSelectModule } from 'primeng/multiselect';
 import { ApiService } from '../../services/api.service';
 import { UtilsService } from '../../services/utils.service';
 import {
+    AlertOut,
     ClosePricePoint,
     DashboardTotals,
     EnvelopeSeriesLine,
@@ -40,10 +53,15 @@ import {
     TickerSearchResult,
     TransactionOut,
     TransactionType,
+    UserSettingsOut,
     WatchlistRow,
     DepositPeriod,
 } from '../../int';
 import { CompactNumberPipe } from '../../shared/amount.normalize';
+import { AlertsModalComponent } from '../../modals/alerts-modal/alerts-modal';
+import { SettingsModalComponent } from '../../modals/settings-modal/settings-modal';
+import { DialogService } from 'primeng/dynamicdialog';
+import { YesNoModalComponent } from '../../modals/yes-no-modal/yes-no-modal.component';
 
 Chart.register(...registerables);
 
@@ -70,10 +88,13 @@ type TxDisplayConfig = { color: string; letter: string; displayValue: string; cl
         DatePickerModule,
         SelectButtonModule,
         InputNumberModule,
+        MultiSelectModule,
         TextareaModule,
         TableModule,
         SkeletonModule,
         CompactNumberPipe,
+        AlertsModalComponent,
+        SettingsModalComponent,
     ],
     templateUrl: './dashboard.html',
     styleUrls: ['./dashboard.scss'],
@@ -82,41 +103,47 @@ export class DashboardComponent {
     private readonly apiService = inject(ApiService);
     private readonly utilsService = inject(UtilsService);
     private readonly destroyRef = inject(DestroyRef);
+    private readonly dialogService = inject(DialogService);
 
     // ── Static config ─────────────────────────────────────────────────────────
 
     readonly transactionTypes = this.utilsService.transactionTypes;
-
     readonly txConfig: Record<TransactionType, TxDisplayConfig> = {
         BUY: {
             color: '#3b82f6',
             letter: 'B',
             displayValue: 'BUY',
-            class: 'bg-blue-50 text-blue-700 border-blue-200/60',
+            class: 'bg-blue-50 text-blue-700 border-blue-200/60 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-700/40',
         },
         SELL: {
             color: '#f43f5e',
             letter: 'S',
             displayValue: 'SELL',
-            class: 'bg-rose-50 text-rose-700 border-rose-200/60',
+            class: 'bg-rose-50 text-rose-700 border-rose-200/60 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-700/40',
         },
         DEPOSIT: {
             color: '#10b981',
             letter: 'D',
             displayValue: 'DEP',
-            class: 'bg-emerald-50 text-emerald-700 border-emerald-200/60',
+            class: 'bg-emerald-50 text-emerald-700 border-emerald-200/60 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-700/40',
         },
         WITHDRAW: {
             color: '#f59e0b',
             letter: 'W',
             displayValue: 'WDW',
-            class: 'bg-amber-50 text-amber-700 border-amber-200/60',
+            class: 'bg-amber-50 text-amber-700 border-amber-200/60 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-700/40',
         },
         DIVIDEND: {
             color: '#8b5cf6',
             letter: 'V', // "D" is used by DEPOSIT; "V" from diVidend
             displayValue: 'DIV',
-            class: 'bg-violet-50 text-violet-700 border-violet-200/60',
+            class: 'bg-violet-50 text-violet-700 border-violet-200/60 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-700/40',
+        },
+    };
+    public readonly multiSelectPt: any = {
+        hiddenInput: {
+            inputmode: 'none',
+            readonly: true,
         },
     };
 
@@ -134,6 +161,7 @@ export class DashboardComponent {
 
     readonly isRevealed = signal(false);
     readonly isChartLoading = signal(false);
+    readonly benchmarkMode = signal(false);
     private readonly refreshTrigger$ = new Subject<void>();
     private readonly rangeTrigger$ = new BehaviorSubject<OverviewPeriod>('1y');
 
@@ -165,20 +193,40 @@ export class DashboardComponent {
             },
     );
 
+    readonly currencySymbol = linkedSignal(() => this.data()?.dashboard.user_currency ?? '€');
+
     readonly depositEntries: Array<{ key: DepositPeriod; label: string }> = [
         { key: '30d', label: '1M' },
         { key: '90d', label: '3M' },
-        // Skip 6m / 1y / 5y for now. Keep it for later usage
-        // { key: "180d", label: "6M" },
-        // { key: "1y", label: "1Y" },
-        // { key: "5y", label: "5Y" },
+        { key: '1y', label: '1Y' },
     ];
+
+    isLedgerFilterMode = signal<boolean>(false);
+    selectedEnvelopes = signal<EnvelopeSummary[]>([]);
+    selectedTypes = signal<string[]>([]);
+    filteredTransactions = computed(() => {
+        const allTransactions = this.transactions();
+        const envFilter = this.selectedEnvelopes();
+        const typeFilter = this.selectedTypes();
+
+        return allTransactions.filter((trade) => {
+            const matchesEnv = envFilter.length === 0 || envFilter.some((e) => e.name === trade.envelope_name);
+            const matchesType = typeFilter.length === 0 || typeFilter.includes(trade.type);
+
+            return matchesEnv && matchesType;
+        });
+    });
+
     readonly watchlist = signal<WatchlistRow[]>([]);
     readonly trending = signal<WatchlistRow[]>([]);
+    readonly viewSettings = signal(false);
 
     readonly positions = computed(() => {
         const raw = this.data()?.dashboard.positions ?? [];
-        return [...raw].sort((a, b) => a.envelope_name.localeCompare(b.envelope_name));
+        return [...raw].sort((a, b) => {
+            const envCmp = a.envelope_name.localeCompare(b.envelope_name);
+            return envCmp !== 0 ? envCmp : b.current_value - a.current_value;
+        });
     });
 
     readonly transactions = computed(() => this.data()?.dashboard.transactions ?? []);
@@ -186,6 +234,9 @@ export class DashboardComponent {
     readonly overviewStats = computed<EnvelopeStats | null>(() => this.data()?.overview.stats ?? null);
     readonly chartSeries = computed(() => this.data()?.overview.series ?? []);
     readonly chartDates = computed(() => this.data()?.overview.dates ?? []);
+    readonly chartBenchmarkPct = computed(() => this.data()?.overview.benchmark_pct ?? []);
+    readonly chartPortfolioPct = computed(() => this.data()?.overview.portfolio_pct ?? []);
+    readonly isDarkMode = computed(() => this.utilsService.darkMode());
     /** True once the first API response has resolved — guards against flashing empty states on initial load. */
     readonly isDataLoaded = computed(() => this.data() !== undefined);
 
@@ -210,15 +261,51 @@ export class DashboardComponent {
      */
     readonly envelopeMetrics = computed(() => {
         const positions = this.data()?.dashboard.positions ?? [];
-        return positions.reduce<Record<string, { invested: number; pnl: number; allocation: number }>>((acc, p) => {
+        return positions.reduce<
+            Record<string, { invested: number; pnl: number; allocation: number; cost_basis: number }>
+        >((acc, p) => {
             const key = p.envelope_name;
-            if (!acc[key]) acc[key] = { invested: 0, pnl: 0, allocation: 0 };
+            if (!acc[key]) acc[key] = { invested: 0, pnl: 0, allocation: 0, cost_basis: 0 };
             acc[key].invested += p.current_value;
             acc[key].pnl += p.unrealized_pnl;
             acc[key].allocation += p.allocation_pct;
+            acc[key].cost_basis += p.cost_basis;
             return acc;
         }, {});
     });
+
+    // ── Settings modal ────────────────────────────────────────────────────────
+
+    readonly settingsModalVisible = signal(false);
+
+    onSettingsSaved(settings: UserSettingsOut): void {
+        if (settings.currency) this.currencySymbol.set(settings.currency);
+    }
+
+    // ── Alerts modal ──────────────────────────────────────────────────────────
+
+    readonly userAlerts = signal<AlertOut[]>([]);
+    readonly alertsModalVisible = signal(false);
+    readonly alertsModalTicker = signal<WatchlistRow>({} as WatchlistRow);
+
+    hasAlertsFor(ticker: string): boolean {
+        return this.userAlerts().some((a) => a.ticker === ticker);
+    }
+
+    openAlertsModal(ticker: WatchlistRow, event: Event): void {
+        event.stopPropagation();
+        this.alertsModalTicker.set(ticker);
+        this.alertsModalVisible.set(true);
+    }
+
+    onAlertChanged(): void {
+        this.apiService
+            .getAlerts()
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+                next: (alerts) => this.userAlerts.set(alerts),
+            });
+    }
 
     // ── Envelope dialog ───────────────────────────────────────────────────────
 
@@ -260,12 +347,8 @@ export class DashboardComponent {
     readonly isCreatingTransaction = signal(false);
     readonly transactionMode = signal<'form' | 'paste'>('form');
     readonly isParsingError = signal<string | null>(null);
-
-    readonly transactionModeOptions = [
-        { label: 'Form Entry', value: 'form' },
-        { label: 'Bulk Paste', value: 'paste' },
-    ];
-
+    readonly sellTickerNotice = signal<{ message: string; isWarning: boolean } | null>(null);
+    readonly dividendMode = signal<'flat' | 'per-share'>('flat');
     readonly bulkPasteContent = new FormControl('', { nonNullable: true });
 
     readonly transactionForm = new FormGroup({
@@ -283,6 +366,7 @@ export class DashboardComponent {
 
     readonly chartCanvas = viewChild<ElementRef<HTMLCanvasElement>>('portfolioChart');
     private chartInstance: Chart | null = null;
+    private readonly hiddenSeries = signal<Set<string>>(new Set());
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -305,17 +389,62 @@ export class DashboardComponent {
             }
             ticker.updateValueAndValidity();
             shares.updateValueAndValidity();
+            this.sellTickerNotice.set(null);
+            this.dividendMode.set('flat');
         });
+
+        // SELL auto-envelope: switch envelope to whichever holds the typed ticker
+        this.transactionForm.controls.ticker.valueChanges
+            .pipe(debounceTime(400), takeUntilDestroyed())
+            .subscribe((raw) => {
+                if (this.transactionForm.controls.type.value !== 'SELL') return;
+                this.sellTickerNotice.set(null);
+
+                const ticker = raw?.trim().toUpperCase();
+                if (!ticker) return;
+
+                const currentEnvelope = this.transactionForm.controls.envelope_name.value;
+                const positions = this.positions();
+
+                if (positions.some((p) => p.ticker === ticker && p.envelope_name === currentEnvelope)) return;
+
+                const match = positions.find((p) => p.ticker === ticker);
+                if (match) {
+                    this.transactionForm.controls.envelope_name.setValue(match.envelope_name);
+                    this.sellTickerNotice.set({
+                        message: `Envelope auto-set to "${match.envelope_name}"`,
+                        isWarning: false,
+                    });
+                    return;
+                }
+
+                this.sellTickerNotice.set({ message: `${ticker} is not held in any envelope.`, isWarning: true });
+            });
 
         // Re-render the chart whenever the data signals change
         effect(() => {
             const series = this.chartSeries();
             const dates = this.chartDates();
             const txs = this.transactions();
+            const benchmarkMode = this.benchmarkMode();
+            const benchmarkPct = this.chartBenchmarkPct();
+            const portfolioPct = this.chartPortfolioPct();
+            const isDarkMode = this.isDarkMode();
             const canvasRef = this.chartCanvas();
 
             if (series.length > 0 && dates.length > 0 && canvasRef?.nativeElement) {
-                requestAnimationFrame(() => this.renderChart(canvasRef.nativeElement, dates, series, txs));
+                requestAnimationFrame(() =>
+                    this.renderChart(
+                        canvasRef.nativeElement,
+                        dates,
+                        series,
+                        txs,
+                        benchmarkMode,
+                        benchmarkPct,
+                        portfolioPct,
+                        isDarkMode,
+                    ),
+                );
             }
         });
 
@@ -323,6 +452,13 @@ export class DashboardComponent {
             const rows = this.data()?.dashboard.watchlist;
             if (rows) this.watchlist.set(rows);
         });
+
+        this.apiService
+            .getAlerts()
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+                next: (alerts) => this.userAlerts.set(alerts),
+            });
     }
 
     // ── Chart rendering (preserved as-is per product spec) ───────────────────
@@ -332,6 +468,10 @@ export class DashboardComponent {
         dates: string[],
         series: EnvelopeSeriesLine[],
         transactions: TransactionOut[],
+        benchmarkMode: boolean,
+        benchmarkPct: (number | null)[],
+        portfolioPct: (number | null)[],
+        isDarkMode: boolean,
     ): void {
         if (this.chartInstance) {
             this.chartInstance.destroy();
@@ -340,9 +480,14 @@ export class DashboardComponent {
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
+        const gridColor = isDarkMode ? '#3f3f46' : '#f1f5f9';
+        const tickColor = isDarkMode ? '#a1a1aa' : '#64748b';
+        const crosshairColor = isDarkMode ? '#52525b' : '#cbd5e1';
+        const pointBg = isDarkMode ? '#27272a' : '#ffffff';
+
         const txByDateIndex = new Map<number, TransactionOut[]>();
         transactions.forEach((tx) => {
-            const tTime = new Date(tx.date).getTime();
+            const tTime = new Date(tx.date.slice(0, 10)).getTime();
             if (isNaN(tTime)) return;
 
             let closestIdx = -1;
@@ -370,82 +515,76 @@ export class DashboardComponent {
                 const ctx = chart.ctx;
                 const datasets = chart.data.datasets;
 
-                txByDateIndex.forEach((dayTxs, index) => {
-                    const txByEnv = new Map<string, TransactionOut[]>();
-                    dayTxs.forEach((t) => {
-                        if (!txByEnv.has(t.envelope_name)) txByEnv.set(t.envelope_name, []);
-                        txByEnv.get(t.envelope_name)!.push(t);
-                    });
+                const drawBubblesAt = (dsIndex: number, pointIndex: number, txList: TransactionOut[]) => {
+                    const meta = chart.getDatasetMeta(dsIndex);
+                    if (!meta?.data[pointIndex]) return;
+                    const { x, y } = meta.data[pointIndex];
+                    const uniqueTypes = Array.from(new Set(txList.map((tx) => tx.type)));
+                    uniqueTypes.forEach((type, i) => {
+                        const tConf = this.txConfig[type];
+                        const color = tConf.color;
+                        const letter = tConf.letter;
+                        const bubbleR = 6;
+                        const connectorLen = 10;
+                        const bubbleLift = 8;
+                        const chartArea = chart.chartArea;
+                        const nearRightEdge = x + bubbleR + connectorLen > chartArea.right - 2;
+                        const yOffset = y - 14 - i * 8;
+                        const bubbleX = nearRightEdge ? x - connectorLen - bubbleR : x;
+                        const bubbleY = nearRightEdge ? yOffset - bubbleLift : yOffset;
 
-                    txByEnv.forEach((envTxs, envName) => {
-                        const dsIndex = datasets.findIndex((ds: any) => ds.label === envName);
-                        if (dsIndex !== -1) {
-                            const meta = chart.getDatasetMeta(dsIndex);
-                            if (meta && meta.data[index]) {
-                                const point = meta.data[index];
-                                const x = point.x;
-                                const y = point.y;
+                        ctx.save();
+                        ctx.beginPath();
+                        const stemStartY = i === 0 ? y - 3 : y - 14 - (i - 1) * 10;
+                        ctx.moveTo(x, stemStartY);
+                        ctx.lineTo(x, yOffset);
+                        ctx.strokeStyle = color;
+                        ctx.lineWidth = 1;
+                        ctx.globalAlpha = 0.35;
+                        ctx.stroke();
 
-                                const uniqueTypes = Array.from(new Set(envTxs.map((tx) => tx.type)));
-
-                                uniqueTypes.forEach((type, i) => {
-                                    const tConf = this.txConfig[type];
-                                    const color = tConf.color;
-                                    const letter = tConf.letter;
-
-                                    const bubbleR = 6;
-                                    const connectorLen = 10;
-                                    const bubbleLift = 8;
-
-                                    const chartArea = chart.chartArea;
-                                    const nearRightEdge = x + bubbleR + connectorLen > chartArea.right - 2;
-                                    const yOffset = y - 14 - i * 8;
-                                    const bubbleX = nearRightEdge ? x - connectorLen - bubbleR : x;
-                                    const bubbleY = nearRightEdge ? yOffset - bubbleLift : yOffset;
-
-                                    ctx.save();
-
-                                    ctx.beginPath();
-                                    const stemStartY = i === 0 ? y - 3 : y - 14 - (i - 1) * 10;
-                                    ctx.moveTo(x, stemStartY);
-                                    ctx.lineTo(x, yOffset);
-                                    ctx.strokeStyle = color;
-                                    ctx.lineWidth = 1;
-                                    ctx.globalAlpha = 0.35;
-                                    ctx.stroke();
-
-                                    if (nearRightEdge) {
-                                        ctx.beginPath();
-                                        ctx.moveTo(x, yOffset);
-                                        ctx.lineTo(bubbleX, bubbleY);
-                                        ctx.strokeStyle = color;
-                                        ctx.lineWidth = 1;
-                                        ctx.globalAlpha = 0.45;
-                                        ctx.stroke();
-                                    }
-
-                                    ctx.globalAlpha = 1;
-                                    ctx.beginPath();
-                                    ctx.arc(bubbleX, bubbleY, bubbleR, 0, Math.PI * 2);
-                                    ctx.fillStyle = color;
-                                    ctx.fill();
-
-                                    ctx.lineWidth = 1.5;
-                                    ctx.strokeStyle = '#ffffff';
-                                    ctx.stroke();
-
-                                    ctx.fillStyle = '#ffffff';
-                                    ctx.font = 'bold 8px ui-sans-serif, system-ui, sans-serif';
-                                    ctx.textAlign = 'center';
-                                    ctx.textBaseline = 'middle';
-                                    ctx.fillText(letter, bubbleX, bubbleY + 0.5);
-
-                                    ctx.restore();
-                                });
-                            }
+                        if (nearRightEdge) {
+                            ctx.beginPath();
+                            ctx.moveTo(x, yOffset);
+                            ctx.lineTo(bubbleX, bubbleY);
+                            ctx.strokeStyle = color;
+                            ctx.lineWidth = 1;
+                            ctx.globalAlpha = 0.45;
+                            ctx.stroke();
                         }
+
+                        ctx.globalAlpha = 1;
+                        ctx.beginPath();
+                        ctx.arc(bubbleX, bubbleY, bubbleR, 0, Math.PI * 2);
+                        ctx.fillStyle = color;
+                        ctx.fill();
+                        ctx.lineWidth = 1.5;
+                        ctx.strokeStyle = this.isDarkMode() ? '#000000' : '#ffffff';
+                        ctx.stroke();
+
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = 'bold 8px ui-sans-serif, system-ui, sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(letter, bubbleX, bubbleY + 0.5);
+                        ctx.restore();
                     });
-                });
+                };
+
+                if (!benchmarkMode) {
+                    txByDateIndex.forEach((dayTxs, index) => {
+                        const txByEnv = new Map<string, TransactionOut[]>();
+                        dayTxs.forEach((t) => {
+                            if (!txByEnv.has(t.envelope_name)) txByEnv.set(t.envelope_name, []);
+                            txByEnv.get(t.envelope_name)!.push(t);
+                        });
+                        txByEnv.forEach((envTxs, envName) => {
+                            const dsIndex = datasets.findIndex((ds: any) => ds.label === envName);
+                            if (dsIndex !== -1 && chart.isDatasetVisible(dsIndex))
+                                drawBubblesAt(dsIndex, index, envTxs);
+                        });
+                    });
+                }
             },
         };
 
@@ -464,36 +603,76 @@ export class DashboardComponent {
                 ctx.moveTo(x, topY);
                 ctx.lineTo(x, bottomY);
                 ctx.lineWidth = 1;
-                ctx.strokeStyle = '#cbd5e1';
+                ctx.strokeStyle = crosshairColor;
                 ctx.setLineDash([4, 4]);
                 ctx.stroke();
                 ctx.restore();
             },
         };
 
-        const datasets = series
-            .filter((s) => s.name !== 'Total')
-            .map((s) => {
-                const colorSet = s.color;
-                const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-                gradient.addColorStop(0, colorSet + '60');
-                gradient.addColorStop(1, colorSet + '0D');
+        const portfolioLineColor = '#3b82f6';
+        const benchmarkLineColor = '#f59e0b';
 
-                return {
-                    label: s.name,
-                    data: s.values,
-                    borderColor: colorSet,
-                    backgroundColor: gradient,
-                    borderWidth: 2,
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    pointHoverRadius: 6,
-                    pointBackgroundColor: '#ffffff',
-                    pointBorderColor: colorSet,
-                    pointBorderWidth: 2,
-                };
-            });
+        const datasets = benchmarkMode
+            ? (() => {
+                  const gradPort = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                  gradPort.addColorStop(0, portfolioLineColor + '30');
+                  gradPort.addColorStop(1, portfolioLineColor + '05');
+                  return [
+                      {
+                          label: 'Portfolio',
+                          data: portfolioPct,
+                          borderColor: portfolioLineColor,
+                          backgroundColor: gradPort,
+                          borderWidth: 2,
+                          fill: true,
+                          tension: 0.3,
+                          pointRadius: 0,
+                          pointHoverRadius: 6,
+                          pointBackgroundColor: pointBg,
+                          pointBorderColor: portfolioLineColor,
+                          pointBorderWidth: 2,
+                      },
+                      {
+                          label: 'WPEA.PA',
+                          data: benchmarkPct,
+                          borderColor: benchmarkLineColor,
+                          backgroundColor: 'transparent',
+                          borderWidth: 2,
+                          borderDash: [5, 4],
+                          fill: false,
+                          tension: 0.3,
+                          pointRadius: 0,
+                          pointHoverRadius: 6,
+                          pointBackgroundColor: pointBg,
+                          pointBorderColor: benchmarkLineColor,
+                          pointBorderWidth: 2,
+                      },
+                  ];
+              })()
+            : series
+                  .filter((s) => s.name !== 'Total')
+                  .map((s) => {
+                      const colorSet = s.color;
+                      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                      gradient.addColorStop(0, colorSet + '60');
+                      gradient.addColorStop(1, colorSet + '0D');
+
+                      return {
+                          label: s.name,
+                          data: s.values,
+                          borderColor: colorSet,
+                          backgroundColor: gradient,
+                          borderWidth: 2,
+                          fill: true,
+                          tension: 0.3,
+                          pointRadius: 0,
+                          pointHoverRadius: 6,
+                          pointBackgroundColor: pointBg,
+                          pointBorderColor: colorSet,
+                          pointBorderWidth: 2,
+                      };
+                  });
 
         const config: ChartConfiguration = {
             type: 'line',
@@ -509,22 +688,24 @@ export class DashboardComponent {
                         grid: { display: false },
                         ticks: {
                             maxTicksLimit: 7,
-                            color: '#64748b',
+                            color: tickColor,
                             font: { family: 'Inter, ui-sans-serif, system-ui, sans-serif', size: 11, weight: 500 },
                         },
                         border: { display: false },
                     },
                     y: {
-                        stacked: true,
-                        grid: { color: '#f1f5f9', tickLength: 0 },
+                        stacked: !benchmarkMode,
+                        grid: { color: gridColor, tickLength: 0 },
                         border: { display: false, dash: [4, 4] },
                         ticks: {
                             callback: (value) =>
-                                new Intl.NumberFormat(navigator.language, {
-                                    notation: 'compact',
-                                    maximumFractionDigits: 1,
-                                }).format(Number(value)),
-                            color: '#64748b',
+                                benchmarkMode
+                                    ? (Number(value) >= 0 ? '+' : '') + Number(value).toFixed(1) + '%'
+                                    : new Intl.NumberFormat(navigator.language, {
+                                          notation: 'compact',
+                                          maximumFractionDigits: 1,
+                                      }).format(Number(value)),
+                            color: tickColor,
                             font: { family: 'ui-monospace, SFMono-Regular, monospace', size: 11 },
                         },
                     },
@@ -564,34 +745,64 @@ export class DashboardComponent {
                             const index = tooltip.dataPoints[0].dataIndex;
                             const dayTxs = txByDateIndex.get(index) || [];
 
-                            let html = `<div class="bg-white/95 backdrop-blur-md border border-slate-200/60 shadow-2xl shadow-slate-200/50 rounded-2xl p-4 w-[280px]">`;
-                            html += `<p class="text-xs font-extrabold text-slate-400 mb-3 uppercase tracking-widest">${tooltip.title[0]}</p>`;
+                            let html = `<div class="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border border-slate-200/60 dark:border-zinc-700/60 shadow-2xl shadow-slate-200/50 dark:shadow-zinc-900/50 rounded-2xl p-4 w-[280px]">`;
+                            html += `<p class="text-xs font-extrabold text-slate-400 dark:text-zinc-500 mb-3 uppercase tracking-widest">${tooltip.title[0]}</p>`;
 
-                            let total = 0;
-                            tooltip.dataPoints.forEach((dp) => {
-                                const color = (dp.dataset as any).borderColor || '#000';
-                                const val = dp.raw as number;
-                                total += val;
-                                html += `
+                            if (benchmarkMode) {
+                                let portVal: number | null = null;
+                                let benchVal: number | null = null;
+                                tooltip.dataPoints.forEach((dp) => {
+                                    const val = dp.raw as number | null;
+                                    if (val === null) return;
+                                    const color = (dp.dataset as any).borderColor || '#000';
+                                    const sign = val >= 0 ? '+' : '';
+                                    html += `
                   <div class="flex justify-between items-center gap-4 mb-2">
                     <div class="flex items-center gap-2">
-                      <span class="w-2.5 h-2.5 rounded-full ring-2 ring-white shadow-sm" style="background-color: ${color}"></span>
-                      <span class="text-[13px] font-semibold text-slate-700">${dp.dataset.label}</span>
+                      <span class="w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 shadow-sm" style="background-color: ${color}"></span>
+                      <span class="text-[13px] font-semibold text-slate-700 dark:text-zinc-300">${dp.dataset.label}</span>
                     </div>
-                    <span class="text-[13px] font-medium text-slate-900 font-mono tracking-tight">${formatCurrency(val)}</span>
+                    <span class="text-[13px] font-medium text-slate-900 dark:text-zinc-50 font-mono tracking-tight">${sign}${val.toFixed(2)}%</span>
                   </div>`;
-                            });
-
-                            html += `
-                <div class="mt-3 pt-3 border-t border-slate-100/80 flex justify-between items-center">
-                  <span class="text-[13px] font-extrabold text-slate-900">Total</span>
-                  <span class="text-sm font-extrabold text-slate-900 font-mono tracking-tight">${formatCurrency(total)}</span>
+                                    if (dp.dataset.label === 'Portfolio') portVal = val;
+                                    else benchVal = val;
+                                });
+                                if (portVal !== null && benchVal !== null) {
+                                    const delta = portVal - benchVal;
+                                    const sign = delta >= 0 ? '+' : '';
+                                    const deltaColor = delta >= 0 ? '#10b981' : '#f43f5e';
+                                    html += `
+                <div class="mt-3 pt-3 border-t border-slate-100/80 dark:border-zinc-700/80 flex justify-between items-center">
+                  <span class="text-[13px] font-extrabold text-slate-900 dark:text-zinc-50">vs WPEA.PA</span>
+                  <span class="text-sm font-extrabold font-mono tracking-tight" style="color:${deltaColor}">${sign}${delta.toFixed(2)}%</span>
                 </div>`;
-
-                            if (dayTxs.length > 0) {
+                                }
+                            } else {
+                                let total = 0;
+                                tooltip.dataPoints.forEach((dp) => {
+                                    const color = (dp.dataset as any).borderColor || '#000';
+                                    const val = dp.raw as number;
+                                    total += val;
+                                    html += `
+                  <div class="flex justify-between items-center gap-4 mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 shadow-sm" style="background-color: ${color}"></span>
+                      <span class="text-[13px] font-semibold text-slate-700 dark:text-zinc-300">${dp.dataset.label}</span>
+                    </div>
+                    <span class="text-[13px] font-medium text-slate-900 dark:text-zinc-50 font-mono tracking-tight">${formatCurrency(val)} €</span>
+                  </div>`;
+                                });
                                 html += `
-                  <div class="mt-4 pt-4 border-t border-slate-200 border-dashed">
-                    <p class="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-3">Transactions</p>
+                <div class="mt-3 pt-3 border-t border-slate-100/80 dark:border-zinc-700/80 flex justify-between items-center">
+                  <span class="text-[13px] font-extrabold text-slate-900 dark:text-zinc-50">Total</span>
+                  <span class="text-sm font-extrabold text-slate-900 dark:text-zinc-50 font-mono tracking-tight">${formatCurrency(total)} €</span>
+                </div>`;
+                            }
+
+                            if (!benchmarkMode && dayTxs.length > 0) {
+                                html += `
+                  <div class="mt-4 pt-4 border-t border-slate-200 dark:border-zinc-700 border-dashed">
+                    <p class="text-[10px] font-extrabold text-slate-400 dark:text-zinc-500 uppercase tracking-widest mb-3">Transactions</p>
                     <div class="flex flex-col gap-2.5">`;
 
                                 const groupedTxs = new Map<string, TransactionOut[]>();
@@ -608,12 +819,12 @@ export class DashboardComponent {
                                     const badgeClass = tConf.class;
                                     const actionLabel = tConf.displayValue;
 
-                                    html += `<div class="bg-slate-50 border border-slate-100 rounded-xl p-2.5 flex flex-col gap-2">`;
+                                    html += `<div class="bg-slate-50 dark:bg-zinc-800 border border-slate-100 dark:border-zinc-700 rounded-xl p-2.5 flex flex-col gap-2">`;
                                     html += `
                     <div class="flex justify-between items-center">
                       <div class="flex items-center gap-2">
                         <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded flex items-center border ${badgeClass}">${actionLabel}</span>
-                        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">${firstTx.envelope_name}</span>
+                        <span class="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">${firstTx.envelope_name}</span>
                       </div>
                     </div>`;
 
@@ -627,19 +838,19 @@ export class DashboardComponent {
                                             html += `
                         <div class="flex justify-between items-center">
                           <div class="flex items-center gap-2">
-                            <span class="text-xs font-bold text-slate-900">${tx.ticker}</span>
-                            <span class="text-[10px] text-slate-500 font-medium bg-white px-1.5 py-0.5 border border-slate-200 rounded-md">
-                              ${formatNumber(tx.shares)} × ${formatCurrency(tx.price)}
+                            <span class="text-xs font-bold text-slate-900 dark:text-zinc-50">${tx.ticker}</span>
+                            <span class="text-[10px] text-slate-500 dark:text-zinc-400 font-medium bg-white dark:bg-zinc-700 px-1.5 py-0.5 border border-slate-200 dark:border-zinc-600 rounded-md">
+                              ${formatNumber(tx.shares)} × ${formatCurrency(tx.price)} €
                             </span>
                           </div>
-                          <span class="text-xs font-bold text-slate-900 font-mono">${formatCurrency(txTotal)}</span>
+                          <span class="text-xs font-bold text-slate-900 dark:text-zinc-50 font-mono">${formatCurrency(txTotal)} €</span>
                         </div>`;
                                         });
                                         if (txs.length > 1) {
                                             html += `
-                        <div class="flex justify-between items-center pt-1.5 mt-0.5 border-t border-slate-200/60">
-                          <span class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Total ${actionLabel}</span>
-                          <span class="text-xs font-bold text-slate-900 font-mono">${formatCurrency(groupTotal)}</span>
+                        <div class="flex justify-between items-center pt-1.5 mt-0.5 border-t border-slate-200/60 dark:border-zinc-600/60">
+                          <span class="text-[9px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-widest">Total ${actionLabel}</span>
+                          <span class="text-xs font-bold text-slate-900 dark:text-zinc-50 font-mono">${formatCurrency(groupTotal)} €</span>
                         </div>`;
                                         }
                                     } else {
@@ -648,13 +859,13 @@ export class DashboardComponent {
                                             groupTotal += tx.price;
                                             html += `
                         <div class="flex justify-end items-center">
-                          <span class="text-[11px] font-medium text-slate-600 font-mono">${sign}${formatCurrency(tx.price)}</span>
+                          <span class="text-[11px] font-medium text-slate-600 dark:text-zinc-300 font-mono">${sign}${formatCurrency(tx.price)} €</span>
                         </div>`;
                                         });
                                         if (txs.length > 1) {
                                             html += `
-                        <div class="flex justify-end items-center pt-1.5 mt-0.5 border-t border-slate-200/60">
-                          <span class="text-xs font-extrabold text-slate-900 font-mono">${sign}${formatCurrency(groupTotal)}</span>
+                        <div class="flex justify-end items-center pt-1.5 mt-0.5 border-t border-slate-200/60 dark:border-zinc-600/60">
+                          <span class="text-xs font-extrabold text-slate-900 dark:text-zinc-50 font-mono">${sign}${formatCurrency(groupTotal)} €</span>
                         </div>`;
                                         }
                                     }
@@ -686,6 +897,16 @@ export class DashboardComponent {
         };
 
         this.chartInstance = new Chart(canvas, config);
+
+        // Restore hidden series — safe: rAF context is not effect-tracked
+        const hidden = this.hiddenSeries();
+        if (hidden.size > 0) {
+            hidden.forEach((name) => {
+                const idx = this.chartInstance!.data.datasets.findIndex((ds) => ds.label === name);
+                if (idx !== -1) this.chartInstance!.setDatasetVisibility(idx, false);
+            });
+            this.chartInstance.update('none');
+        }
     }
 
     // ── Sparkline helper ──────────────────────────────────────────────────────
@@ -806,6 +1027,8 @@ export class DashboardComponent {
         });
         this.bulkPasteContent.reset();
         this.transactionMode.set('form');
+        this.sellTickerNotice.set(null);
+        this.dividendMode.set('flat');
 
         const availableEnvelopes = this.envelopes();
         if (availableEnvelopes.length > 0) {
@@ -817,11 +1040,28 @@ export class DashboardComponent {
 
     closeTransactionDialog(): void {
         this.isTransactionDialogOpen.set(false);
+        this.sellTickerNotice.set(null);
     }
 
     setTransactionMode(mode: 'form' | 'paste'): void {
         this.transactionMode.set(mode);
         this.isParsingError.set(null);
+    }
+
+    setDividendMode(mode: 'flat' | 'per-share'): void {
+        this.dividendMode.set(mode);
+        const { ticker, shares } = this.transactionForm.controls;
+        if (mode === 'per-share') {
+            ticker.setValidators([Validators.required]);
+            shares.setValidators([Validators.required, Validators.min(0.000001)]);
+        } else {
+            ticker.clearValidators();
+            shares.clearValidators();
+            ticker.setValue(null);
+            shares.setValue(null);
+        }
+        ticker.updateValueAndValidity();
+        shares.updateValueAndValidity();
     }
 
     createTransaction(): void {
@@ -831,10 +1071,8 @@ export class DashboardComponent {
 
             const { type, envelope_name, date, price, ticker, shares, fees, note } = this.transactionForm.getRawValue();
 
-            const selectedDate = new Date(date);
-            const isoDate = new Date(selectedDate.getTime() - selectedDate.getTimezoneOffset() * 60000)
-                .toISOString()
-                .slice(0, 19);
+            const d = new Date(date);
+            const isoDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T00:00:00`;
 
             const payload = {
                 type,
@@ -921,6 +1159,15 @@ export class DashboardComponent {
                         shares = parseFloat(rest[2].replace(',', '.'));
                         price = parseFloat(rest[3].replace(',', '.'));
                         fees = parseFloat(rest[4].replace(',', '.'));
+                    } else if (
+                        type === 'DIVIDEND' &&
+                        rest.length >= 4 &&
+                        isNaN(parseFloat(rest[1].replace(',', '.')))
+                    ) {
+                        // Per-share form: DIVIDEND "Envelope" DATE TICKER SHARES PRICE
+                        ticker = rest[1].toUpperCase();
+                        shares = parseFloat(rest[2].replace(',', '.'));
+                        price = parseFloat(rest[3].replace(',', '.'));
                     } else {
                         price = parseFloat(rest[1].replace(',', '.'));
                     }
@@ -955,6 +1202,23 @@ export class DashboardComponent {
         }
     }
 
+    downloadTransactions(envelopeName: string): void {
+        this.apiService
+            .exportTransactions(envelopeName)
+            .pipe(take(1))
+            .subscribe({
+                next: (lines) => {
+                    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${envelopeName}.txt`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                },
+            });
+    }
+
     deleteTransaction(id: number): void {
         this.apiService
             .deleteTransaction(id)
@@ -985,6 +1249,28 @@ export class DashboardComponent {
             });
     }
 
+    confirmRemoveFromWatchlist(ticker: WatchlistRow): void {
+        const confirmModal = this.dialogService.open(YesNoModalComponent, {
+            header: 'Confirm',
+            modal: true,
+            closable: true,
+            dismissableMask: true,
+            draggable: false,
+            resizable: false,
+            breakpoints: {
+                '640px': '90vw',
+            },
+            data: `Unfollow ${ticker.ticker} (${ticker.name})?`,
+        })!;
+
+        confirmModal.onClose.subscribe({
+            next: (bool: boolean) => {
+                if (!bool) return;
+                this.removeFromWatchlist(ticker.ticker);
+            },
+        });
+    }
+
     removeFromWatchlist(ticker: string): void {
         this.apiService
             .removeFromWatchlist({ ticker })
@@ -996,6 +1282,29 @@ export class DashboardComponent {
     }
 
     // ── Time range ────────────────────────────────────────────────────────────
+
+    isSeriesHidden(name: string): boolean {
+        return this.hiddenSeries().has(name);
+    }
+
+    toggleSeries(name: string): void {
+        if (!this.chartInstance) return;
+        const idx = this.chartInstance.data.datasets.findIndex((ds) => ds.label === name);
+        if (idx === -1) return;
+        const currentlyVisible = this.chartInstance.isDatasetVisible(idx);
+        this.chartInstance.setDatasetVisibility(idx, !currentlyVisible);
+        this.chartInstance.update('none');
+        this.hiddenSeries.update((s) => {
+            const next = new Set(s);
+            currentlyVisible ? next.add(name) : next.delete(name);
+            return next;
+        });
+    }
+
+    toggleBenchmark(): void {
+        this.hiddenSeries.set(new Set());
+        this.benchmarkMode.update((v) => !v);
+    }
 
     setTimeRange(label: string): void {
         const ranges = this.timeRanges();
@@ -1064,5 +1373,19 @@ export class DashboardComponent {
 
     toggleReveal(): void {
         this.isRevealed.update((v) => !v);
+    }
+
+    toggleSettings(): void {
+        this.viewSettings.update((v) => !v);
+    }
+
+    toggleLedgerFilterMode() {
+        this.isLedgerFilterMode.update((v) => !v);
+        this.selectedEnvelopes.set([]);
+        this.selectedTypes.set([]);
+    }
+
+    getTxConfig(type: string): TxDisplayConfig {
+        return this.txConfig[type as TransactionType];
     }
 }

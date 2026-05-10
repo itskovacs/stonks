@@ -1,5 +1,5 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
@@ -8,6 +8,8 @@ import { FocusTrapModule } from 'primeng/focustrap';
 import { InputTextModule } from 'primeng/inputtext';
 import { SkeletonModule } from 'primeng/skeleton';
 import { AuthService } from '../../services/auth.service';
+import { AuthParams } from '../../int';
+import { catchError, of } from 'rxjs';
 
 // ---------------------------------------------------------------------------
 // Typed form shape — FormControl<string> with nonNullable ensures getRawValue()
@@ -40,6 +42,9 @@ export class AuthComponent {
         return raw ? decodeURIComponent(raw) : '/';
     })();
 
+    readonly authParams = toSignal(
+        this.authService.authParams().pipe(catchError(() => of<AuthParams>({ register_enabled: true }))),
+    );
     readonly isRegistering = signal(false);
     readonly isLoading = signal(false);
 

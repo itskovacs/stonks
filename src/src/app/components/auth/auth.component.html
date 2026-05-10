@@ -63,6 +63,7 @@
 
       </div>
 
+      @if (authParams()?.register_enabled) {
       <hr class="my-6 border-primary-200 dark:border-primary-700 w-full" />
 
       <!-- Mode toggle -->
@@ -74,7 +75,7 @@
           {{ isRegistering() ? 'Sign in' : 'Create an account' }}
         </button>
       </p>
-
+      }
       } @placeholder (minimum 400ms) {
 
       <!-- Skeleton — mirrors the real form layout to prevent layout shift -->

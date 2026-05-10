@@ -15,8 +15,10 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { BehaviorSubject, combineLatest, filter, map, switchMap, tap } from 'rxjs';
 import { Chart, ChartConfiguration, Plugin, registerables } from 'chart.js';
 import { ApiService } from '../../services/api.service';
+import { UtilsService } from '../../services/utils.service';
 import { PriceChartResponse, StockBar, TransactionType } from '../../int';
 import { TooltipComponent } from '../../shared/tooltip';
+import { AlertsModalComponent } from '../../modals/alerts-modal/alerts-modal';
 
 Chart.register(...registerables);
 
@@ -30,22 +32,40 @@ type TxBadgeConfig = { displayValue: string; class: string };
 @Component({
     selector: 'app-ticker',
     standalone: true,
-    imports: [DecimalPipe, DatePipe, RouterLink, TooltipComponent, KeyValuePipe],
+    imports: [DecimalPipe, DatePipe, RouterLink, TooltipComponent, KeyValuePipe, AlertsModalComponent],
     templateUrl: './ticker.html',
     styleUrls: ['./ticker.scss'],
 })
 export class TickerComponent {
     private readonly apiService = inject(ApiService);
+    private readonly utilsService = inject(UtilsService);
     private readonly route = inject(ActivatedRoute);
     private readonly destroyRef = inject(DestroyRef);
 
+    readonly isDarkMode = computed(() => this.utilsService.darkMode());
+
     // ── Transaction badge config (user positions ledger) ──────────────────────
     readonly txConfig: Record<TransactionType, TxBadgeConfig> = {
-        BUY: { displayValue: 'BUY', class: 'bg-blue-50 text-blue-700 border-blue-200/60' },
-        SELL: { displayValue: 'SELL', class: 'bg-rose-50 text-rose-700 border-rose-200/60' },
-        DEPOSIT: { displayValue: 'DEP', class: 'bg-emerald-50 text-emerald-700 border-emerald-200/60' },
-        WITHDRAW: { displayValue: 'WDW', class: 'bg-amber-50 text-amber-700 border-amber-200/60' },
-        DIVIDEND: { displayValue: 'DIV', class: 'bg-violet-50 text-violet-700 border-violet-200/60' },
+        BUY: {
+            displayValue: 'BUY',
+            class: 'bg-blue-50 text-blue-700 border-blue-200/60 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-700/40',
+        },
+        SELL: {
+            displayValue: 'SELL',
+            class: 'bg-rose-50 text-rose-700 border-rose-200/60 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-700/40',
+        },
+        DEPOSIT: {
+            displayValue: 'DEP',
+            class: 'bg-emerald-50 text-emerald-700 border-emerald-200/60 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-700/40',
+        },
+        WITHDRAW: {
+            displayValue: 'WDW',
+            class: 'bg-amber-50 text-amber-700 border-amber-200/60 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-700/40',
+        },
+        DIVIDEND: {
+            displayValue: 'DIV',
+            class: 'bg-violet-50 text-violet-700 border-violet-200/60 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-700/40',
+        },
     };
 
     // ── Route param shared source ──────────────────────────────────────────────
@@ -55,7 +75,17 @@ export class TickerComponent {
     );
 
     // ── Stock report ──────────────────────────────────────────────────────────
-    readonly report = toSignal(this.ticker$.pipe(switchMap((ticker) => this.apiService.getStockReport(ticker))));
+    private readonly reportTrigger$ = new BehaviorSubject<number>(0);
+    readonly isRefreshing = signal(false);
+    readonly alertsModalVisible = signal(false);
+
+    readonly report = toSignal(
+        combineLatest([this.ticker$, this.reportTrigger$]).pipe(
+            switchMap(([ticker]) =>
+                this.apiService.getStockReport(ticker).pipe(tap(() => this.isRefreshing.set(false))),
+            ),
+        ),
+    );
     readonly kvOrder = () => 0;
 
     // ── Derived computed signals ──────────────────────────────────────────────
@@ -70,21 +100,21 @@ export class TickerComponent {
         if (rsi >= 70)
             return {
                 text: 'OVERBOUGHT',
-                badgeClass: 'bg-red-100 text-red-700',
-                textClass: 'text-red-600',
+                badgeClass: 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400',
+                textClass: 'text-red-600 dark:text-red-400',
                 barClass: 'bg-red-500',
             };
         if (rsi <= 30)
             return {
                 text: 'OVERSOLD',
-                badgeClass: 'bg-green-100 text-green-700',
-                textClass: 'text-green-600',
+                badgeClass: 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400',
+                textClass: 'text-green-600 dark:text-green-400',
                 barClass: 'bg-green-500',
             };
         return {
             text: 'NEUTRAL',
-            badgeClass: 'bg-primary-100 text-primary-700',
-            textClass: 'text-primary-900',
+            badgeClass: 'bg-primary-100 text-primary-700 dark:bg-primary-700 dark:text-primary-300',
+            textClass: 'text-primary-900 dark:text-primary-50',
             barClass: 'bg-primary-500',
         };
     });
@@ -129,19 +159,19 @@ export class TickerComponent {
     /** Analyst rating badge class — reflects actual direction of the rating. */
     readonly ratingBadgeClass = computed(() => {
         const r = this.report()?.rating_verdict.analyst_rating?.toUpperCase() ?? '';
-        if (r.includes('BUY')) return 'bg-green-100 text-green-700';
-        if (r.includes('SELL')) return 'bg-red-100 text-red-700';
-        return 'bg-primary-100 text-primary-600';
+        if (r.includes('BUY')) return 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400';
+        if (r.includes('SELL')) return 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400';
+        return 'bg-primary-100 text-primary-600 dark:bg-primary-700 dark:text-primary-300';
     });
 
     /** Risk gauge badge — maps label to color. */
     readonly riskBadgeClass = computed(() => {
         const l = this.report()?.risk_gauge.label?.toUpperCase() ?? '';
-        if (l === 'LOW') return 'bg-green-100 text-green-700';
-        if (l === 'MODERATE') return 'bg-amber-100 text-amber-700';
-        if (l === 'HIGH') return 'bg-red-100 text-red-700';
-        if (l === 'VERY HIGH') return 'bg-red-200 text-red-800';
-        return 'bg-primary-100 text-primary-600';
+        if (l === 'LOW') return 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400';
+        if (l === 'MODERATE') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400';
+        if (l === 'HIGH') return 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400';
+        if (l === 'VERY HIGH') return 'bg-red-200 text-red-800 dark:bg-red-900/30 dark:text-red-300';
+        return 'bg-primary-100 text-primary-600 dark:bg-primary-700 dark:text-primary-300';
     });
 
     // ── Watchlist ─────────────────────────────────────────────────────────────
@@ -162,6 +192,19 @@ export class TickerComponent {
                 .pipe(takeUntilDestroyed(this.destroyRef))
                 .subscribe({ next: () => this.isWatchlisted.set(true) });
         }
+    }
+
+    refresh(): void {
+        const ticker = this.report()?.stock_bar.ticker;
+        if (!ticker || this.isRefreshing()) return;
+        this.isRefreshing.set(true);
+        this.apiService
+            .invalidateTickerCache(ticker)
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+                next: () => this.reportTrigger$.next(this.reportTrigger$.value + 1),
+                error: () => this.isRefreshing.set(false),
+            });
     }
 
     // ── Price chart ───────────────────────────────────────────────────────────
@@ -193,7 +236,7 @@ export class TickerComponent {
     );
     readonly diffOverPeriodPct = computed(() => {
         const prices = this.chartData()?.prices;
-        if (!prices) return NaN;
+        if (!prices || prices.length == 0) return NaN;
         const first = prices[0].close;
         const last = prices[prices.length - 1].close;
         return (last * 100) / first - 100;
@@ -212,19 +255,32 @@ export class TickerComponent {
             const data = this.chartData();
             const report = this.report();
             const canvasRef = this.chartCanvas();
+            const isDarkMode = this.isDarkMode();
 
             if (data && report && canvasRef?.nativeElement) {
-                requestAnimationFrame(() => this.renderChart(canvasRef.nativeElement, data, report.stock_bar.currency));
+                requestAnimationFrame(() =>
+                    this.renderChart(canvasRef.nativeElement, data, report.stock_bar.currency, isDarkMode),
+                );
             }
         });
     }
 
     // ── Chart rendering ───────────────────────────────────────────────────────
 
-    private renderChart(canvas: HTMLCanvasElement, chartResponse: PriceChartResponse, currency: string): void {
+    private renderChart(
+        canvas: HTMLCanvasElement,
+        chartResponse: PriceChartResponse,
+        currency: string,
+        isDarkMode = false,
+    ): void {
         if (this.chartInstance) this.chartInstance.destroy();
         const ctx = canvas.getContext('2d');
         if (!ctx || !chartResponse.prices.length) return;
+
+        const gridColor = isDarkMode ? '#3f3f46' : '#f1f5f9';
+        const tickColor = isDarkMode ? '#a1a1aa' : '#64748b';
+        const crosshairColor = isDarkMode ? '#52525b' : '#cbd5e1';
+        const pointBg = isDarkMode ? '#27272a' : '#ffffff';
 
         const { prices, annotations } = chartResponse;
         const labels = prices.map((p) => p.date);
@@ -260,6 +316,8 @@ export class TickerComponent {
         const netChange = closes[closes.length - 1] - closes[0];
         const lineColor = netChange >= 0 ? '#10b981' : '#f43f5e';
 
+        const avg = closes.reduce((s, v) => s + v, 0) / closes.length;
+
         const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
         gradient.addColorStop(0, lineColor + '40');
         gradient.addColorStop(1, lineColor + '04');
@@ -277,7 +335,7 @@ export class TickerComponent {
                 ctx.moveTo(x, top);
                 ctx.lineTo(x, bottom);
                 ctx.lineWidth = 1;
-                ctx.strokeStyle = '#cbd5e1';
+                ctx.strokeStyle = crosshairColor;
                 ctx.setLineDash([4, 4]);
                 ctx.stroke();
                 ctx.restore();
@@ -362,9 +420,20 @@ export class TickerComponent {
                         tension: 0.2,
                         pointRadius: 0,
                         pointHoverRadius: 5,
-                        pointBackgroundColor: '#ffffff',
+                        pointBackgroundColor: pointBg,
                         pointBorderColor: lineColor,
                         pointBorderWidth: 2,
+                    },
+                    {
+                        label: 'Average',
+                        data: new Array(closes.length).fill(avg),
+                        borderColor: '#b4b9c1',
+                        borderWidth: 1,
+                        borderDash: [4, 6],
+                        fill: false,
+                        tension: 0,
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
                     },
                 ],
             },
@@ -379,14 +448,14 @@ export class TickerComponent {
                         grid: { display: false },
                         ticks: {
                             maxTicksLimit: 8,
-                            color: '#64748b',
+                            color: tickColor,
                             font: { family: 'Inter, ui-sans-serif, system-ui, sans-serif', size: 10, weight: 500 },
                         },
                         border: { display: false },
                     },
                     y: {
                         position: 'left',
-                        grid: { color: '#f1f5f9', tickLength: 0 },
+                        grid: { color: gridColor, tickLength: 0 },
                         border: { display: false, dash: [4, 4] },
                         ticks: {
                             callback: (v) =>
@@ -395,7 +464,7 @@ export class TickerComponent {
                                     style: 'currency',
                                     currency: currency || 'USD',
                                 }).format(Number(v)),
-                            color: '#64748b',
+                            color: tickColor,
                             font: { family: 'ui-monospace, SFMono-Regular, monospace', size: 10 },
                         },
                     },
@@ -427,32 +496,39 @@ export class TickerComponent {
                                     style: 'currency',
                                     currency: currency || 'USD',
                                 }).format(v);
+                            const dayPct = ((close - open) / (open || 1)) * 100;
+                            const avgPct = ((close - avg) / (avg || 1)) * 100;
+                            const sign = (v: number) => (v >= 0 ? '+' : '');
+                            const pctColor = (v: number) => (v >= 0 ? 'text-emerald-600' : 'text-red-500');
 
                             el.innerHTML = `
-                <div class="bg-white/95 backdrop-blur-sm border border-slate-200/60 shadow-xl rounded-xl p-3 w-[200px]">
-                  <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">${tooltip.title[0] ?? ''}</p>
-                  <div class="flex justify-between items-center mb-1">
-                    <span class="text-xs font-bold text-slate-900">${fmt(close)}</span>
-                    <span class="text-[10px] font-semibold ${close >= open ? 'text-emerald-600' : 'text-red-500'}">
-                      ${close >= open ? '+' : ''}${(((close - open) / (open || 1)) * 100).toFixed(2)}%
-                    </span>
-                  </div>
-                  <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2 pt-2 border-t border-slate-100">
-                    <span class="text-[10px] text-slate-400">Open</span>  <span class="text-[10px] font-mono font-bold text-slate-700">${fmt(p?.open ?? 0)}</span>
-                    <span class="text-[10px] text-slate-400">High</span>  <span class="text-[10px] font-mono font-bold text-slate-700">${fmt(p?.high ?? 0)}</span>
-                    <span class="text-[10px] text-slate-400">Low</span>   <span class="text-[10px] font-mono font-bold text-slate-700">${fmt(p?.low ?? 0)}</span>
-                    <span class="text-[10px] text-slate-400">Vol</span>   <span class="text-[10px] font-mono font-bold text-slate-700">${new Intl.NumberFormat(navigator.language, { notation: 'compact' }).format(p?.volume ?? 0)}</span>
+                <div class="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-sm border border-slate-200/60 dark:border-zinc-700/60 shadow-xl rounded-xl p-3 w-[200px]">
+                <div class="flex justify-between items-center mb-1">
+                    <div class="flex flex-col items-start gap-1">
+                    <p class="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-widest">${tooltip.title[0] ?? ''}</p>
+                    <span class="text-xs font-bold text-slate-900 dark:text-zinc-50">${fmt(close)}</span>
+                    </div>
+
+                    <div class="flex flex-col items-end gap-1">
+                    <span class="text-[10px] font-semibold ${pctColor(avgPct)}">${sign(avgPct)}${avgPct.toFixed(2)}% avg</span>
+                      <span class="text-[10px] font-semibold ${pctColor(dayPct)}">${sign(dayPct)}${dayPct.toFixed(2)}% day</span>
+                    </div>
+                </div>
+                  <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2 pt-2 border-t border-slate-100 dark:border-zinc-700">
+                    <span class="text-[10px] text-slate-400 dark:text-zinc-500">Open</span>  <span class="text-[10px] font-mono font-bold text-slate-700 dark:text-zinc-300">${fmt(p?.open ?? 0)}</span>
+                    <span class="text-[10px] text-slate-400 dark:text-zinc-500">High</span>  <span class="text-[10px] font-mono font-bold text-slate-700 dark:text-zinc-300">${fmt(p?.high ?? 0)}</span>
+                    <span class="text-[10px] text-slate-400 dark:text-zinc-500">Low</span>   <span class="text-[10px] font-mono font-bold text-slate-700 dark:text-zinc-300">${fmt(p?.low ?? 0)}</span>
+                    <span class="text-[10px] text-slate-400 dark:text-zinc-500">Vol</span>   <span class="text-[10px] font-mono font-bold text-slate-700 dark:text-zinc-300">${new Intl.NumberFormat(navigator.language, { notation: 'compact' }).format(p?.volume ?? 0)}</span>
                   </div>
                 </div>`;
                             el.style.opacity = '1';
                             const tw = 200,
-                                cw = chart.canvas.clientWidth,
-                                m = 12;
-                            let left = tooltip.caretX - tw / 2;
-                            if (left < m) left = m;
-                            if (left + tw > cw - m) left = cw - tw - m;
-                            el.style.left = left + 'px';
-                            el.style.top = tooltip.caretY - 20 + 'px';
+                                gap = 14,
+                                m = 8;
+                            const cw = chart.canvas.clientWidth;
+                            const placeRight = tooltip.caretX + gap + tw <= cw - m;
+                            el.style.left = (placeRight ? tooltip.caretX + gap * 2 : tooltip.caretX - gap - tw) + 'px';
+                            el.style.top = tooltip.caretY + 'px';
                         },
                     },
                 },
@@ -480,13 +556,13 @@ export class TickerComponent {
     cellTextClass(status: string): string {
         switch (status) {
             case 'green':
-                return 'text-green-700';
+                return 'text-green-700 dark:text-green-400';
             case 'red':
-                return 'text-red-700';
+                return 'text-red-700 dark:text-red-400';
             case 'amber':
-                return 'text-amber-600';
+                return 'text-amber-600 dark:text-amber-400';
             default:
-                return 'text-primary-900';
+                return 'text-primary-900 dark:text-primary-50';
         }
     }
 
@@ -508,11 +584,11 @@ export class TickerComponent {
     sentimentClass(sentiment: string): string {
         switch (sentiment) {
             case 'positive':
-                return 'bg-emerald-50 text-emerald-600';
+                return 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400';
             case 'negative':
-                return 'bg-red-50 text-red-500';
+                return 'bg-red-50 text-red-500 dark:bg-red-900/20 dark:text-red-400';
             default:
-                return 'bg-primary-50 text-primary-400';
+                return 'bg-primary-50 text-primary-400 dark:bg-primary-700 dark:text-primary-500';
         }
     }
 
@@ -550,20 +626,20 @@ export class TickerComponent {
         const map: Record<string, { text: string; badgeClass: string; textClass: string; barClass: string }> = {
             BUY: {
                 text: 'BUY',
-                badgeClass: 'bg-green-100 text-green-700',
-                textClass: 'text-green-600',
+                badgeClass: 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400',
+                textClass: 'text-green-600 dark:text-green-400',
                 barClass: 'bg-green-500',
             },
             HOLD: {
                 text: 'HOLD',
-                badgeClass: 'bg-amber-100 text-amber-700',
-                textClass: 'text-amber-600',
+                badgeClass: 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400',
+                textClass: 'text-amber-600 dark:text-amber-400',
                 barClass: 'bg-amber-400',
             },
             SELL: {
                 text: 'SELL',
-                badgeClass: 'bg-red-100 text-red-700',
-                textClass: 'text-red-600',
+                badgeClass: 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400',
+                textClass: 'text-red-600 dark:text-red-400',
                 barClass: 'bg-red-500',
             },
         };

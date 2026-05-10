@@ -30,6 +30,10 @@ export interface RefreshTokenRequest {
     refresh_token: string;
 }
 
+export interface AuthParams {
+    register_enabled: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // REQUESTS (sent to the API — match TransactionRequest / EnvelopeRequest)
 // ---------------------------------------------------------------------------
@@ -52,6 +56,36 @@ export interface TransactionRequest {
     fees?: number; // defaults to 0
     envelope_name: string;
     note?: string | null;
+}
+
+export interface UserSettingsRequest {
+    currency?: string | null; // ISO 4217, e.g. "USD" — null to leave unchanged
+    apprise_url?: string | null; // comma-separated Apprise URLs — null to leave unchanged
+}
+
+export interface UserSettingsOut {
+    currency: string | null;
+    apprise_url: string | null;
+}
+
+export interface AlertRequest {
+    ticker: string; // normalized to uppercase by the API
+    target_price: number; // must be > 0
+    trigger_above: boolean;
+}
+
+export interface AlertUpdateRequest {
+    target_price?: number; // at least one of these two must be provided
+    trigger_above?: boolean;
+}
+
+export interface AlertOut {
+    id: number;
+    ticker: string;
+    target_price: number;
+    trigger_above: boolean;
+    is_armed: boolean;
+    last_triggered: string | null; // YYYY-MM-DD date string or null
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +111,7 @@ export interface MutationResponse {
 
 export interface StockBar {
     ticker: string;
-    company_name: string;
+    name: string;
     sector: string;
     industry: string;
     current_price: number;
@@ -94,6 +128,9 @@ export interface StockBar {
     rsi_14: number | null;
     sma_50: number | null;
     sma_200: number | null;
+    pre_market_price: number | null;
+    pre_market_change: number | null;
+    pre_market_change_pct: number | null;
 }
 
 export interface RiskGauge {
@@ -337,6 +374,8 @@ export interface TransactionOut {
     total: number;
     envelope_name: string; // resolved via FK join at read time
     note: string | null;
+    realized_pnl: number | null;
+    realized_pnl_pct: number | null;
 }
 
 export interface EnvelopeOut {
@@ -360,6 +399,9 @@ export interface WatchlistRow {
     sector: string | null;
     currency: string;
     history_7d: ClosePricePoint[];
+    pre_market_price: number | null;
+    pre_market_change: number | null;
+    pre_market_change_pct: number | null;
 }
 
 export interface PositionRow {
@@ -387,6 +429,7 @@ export interface EnvelopeSummary {
     color: string;
     cash_available: number;
     total_value: number; // cash + equity mark-to-market
+    capital_in: number; // SUM(DEPOSIT + DIVIDEND) − SUM(WITHDRAW), all-time
 }
 
 export interface DashboardTotals {
@@ -409,6 +452,7 @@ export interface DashboardResponse {
     envelopes: EnvelopeSummary[];
     transactions: TransactionOut[];
     totals: DashboardTotals;
+    user_currency: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -458,6 +502,8 @@ export interface EnvelopeOverviewResponse {
     series: EnvelopeSeriesLine[]; // values[i] corresponds to dates[i]
     events: EnvelopeEvent[];
     stats: EnvelopeStats;
+    benchmark_pct: (number | null)[];
+    portfolio_pct: (number | null)[];
 }
 
 // ---------------------------------------------------------------------------

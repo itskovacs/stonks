@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import yfinance as yf
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -16,9 +17,10 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from config import get_settings
 from db.core import init_and_migrate_db
-from routers import auth, news, profile, stock
+from routers import alerts, auth, news, profile, stock
+from services.scheduler import check_prices_and_notify
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -37,9 +39,13 @@ async def lifespan(app: FastAPI):
     await init_and_migrate_db()
     _silence_http_logging()
     log.info("STONKS ready")
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(check_prices_and_notify, 'cron', day_of_week='mon-fri', hour='7-22', minute='*/15')
+    scheduler.start()
+    log.info("Scheduler (alerts) ready")
     yield
+    scheduler.shutdown()
     log.info("Shutting down")
-
 
 app = FastAPI(title="Stonks", version=VERSION, lifespan=lifespan)
 
@@ -56,6 +62,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(stock.router, prefix="/api")
 app.include_router(news.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
+app.include_router(alerts.router, prefix="/api")
 
 
 @app.get("/api/")

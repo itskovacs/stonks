@@ -2,6 +2,9 @@ import { inject, Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {
+    AlertOut,
+    AlertRequest,
+    AlertUpdateRequest,
     DashboardResponse,
     EnvelopeOverviewResponse,
     EnvelopeRequest,
@@ -13,6 +16,8 @@ import {
     TickerRequest,
     TickerSearchResult,
     TransactionRequest,
+    UserSettingsOut,
+    UserSettingsRequest,
     WatchlistRow,
 } from '../int';
 
@@ -45,6 +50,10 @@ export class ApiService {
      * Valid period values: 1d | 1w | 1m | 3m | 6m | ytd | 1y | 5y
      * Note: chart periods differ from overview periods — do not substitute OverviewPeriod here.
      */
+    invalidateTickerCache(ticker: string): Observable<void> {
+        return this.http.delete<void>(`${this.apiBaseUrl}/stock/cache/${ticker}`);
+    }
+
     getStockChart(
         ticker: string,
         period: '1d' | '1w' | '1m' | '3m' | '6m' | 'ytd' | '1y' | '5y' = '1y',
@@ -139,5 +148,51 @@ export class ApiService {
      */
     deleteTransaction(id: number): Observable<object> {
         return this.http.delete<object>(`${this.apiBaseUrl}/profile/transactions/${id}`);
+    }
+
+    exportTransactions(envelopeName: string): Observable<string[]> {
+        return this.http.get<string[]>(`${this.apiBaseUrl}/profile/transactions/export`, {
+            params: { envelope_name: envelopeName },
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // User Settings — GET/PUT /profile/settings
+    // ---------------------------------------------------------------------------
+
+    getSettings(): Observable<UserSettingsOut> {
+        return this.http.get<UserSettingsOut>(`${this.apiBaseUrl}/profile/settings`);
+    }
+
+    /**
+     * Pass only the fields to update; omit or pass null to leave a field unchanged.
+     * Returns the full updated settings object.
+     */
+    updateSettings(data: UserSettingsRequest): Observable<UserSettingsOut> {
+        return this.http.put<UserSettingsOut>(`${this.apiBaseUrl}/profile/settings`, data);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Alerts — /profile/alerts
+    // ---------------------------------------------------------------------------
+
+    getAlerts(): Observable<AlertOut[]> {
+        return this.http.get<AlertOut[]>(`${this.apiBaseUrl}/profile/alerts`);
+    }
+
+    createAlert(data: AlertRequest): Observable<AlertOut> {
+        return this.http.post<AlertOut>(`${this.apiBaseUrl}/profile/alerts`, data);
+    }
+
+    /**
+     * At least one of target_price or trigger_above must be set.
+     * Updating either field re-arms the alert automatically.
+     */
+    updateAlert(id: number, data: AlertUpdateRequest): Observable<AlertOut> {
+        return this.http.put<AlertOut>(`${this.apiBaseUrl}/profile/alerts/${id}`, data);
+    }
+
+    deleteAlert(id: number): Observable<MutationResponse> {
+        return this.http.delete<MutationResponse>(`${this.apiBaseUrl}/profile/alerts/${id}`);
     }
 }
