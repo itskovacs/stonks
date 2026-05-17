@@ -12,6 +12,8 @@ import {
     NewsItem,
     OverviewPeriod,
     PriceChartResponse,
+    ProjectionRequest,
+    ProjectionResponse,
     StockReport,
     TickerRequest,
     TickerSearchResult,
@@ -66,16 +68,24 @@ export class ApiService {
     // Dashboard — GET /profile/dashboard (single monolith call — do not split)
     // ---------------------------------------------------------------------------
 
-    getDashboard(): Observable<DashboardResponse> {
-        return this.http.get<DashboardResponse>(`${this.apiBaseUrl}/profile/dashboard`);
+    getDashboard(forceRefresh = false): Observable<DashboardResponse> {
+        const params = forceRefresh ? new HttpParams().set('force_refresh', 'true') : undefined;
+        return this.http.get<DashboardResponse>(`${this.apiBaseUrl}/profile/dashboard`, params ? { params } : {});
     }
 
     // ---------------------------------------------------------------------------
     // Portfolio History Overview — GET /profile/envelope/overview?period=…
     // ---------------------------------------------------------------------------
 
-    getEnvelopesOverview(period: OverviewPeriod = '1y'): Observable<EnvelopeOverviewResponse> {
-        const params = new HttpParams().set('period', period);
+    getEnvelopesOverview(
+        period: OverviewPeriod = '1y',
+        benchmarkTicker = 'XWD.TO',
+        envelopeIds: number[] = [],
+    ): Observable<EnvelopeOverviewResponse> {
+        let params = new HttpParams().set('period', period).set('benchmark', benchmarkTicker);
+        envelopeIds.forEach((id) => {
+            params = params.append('envelope_ids', id);
+        });
         return this.http.get<EnvelopeOverviewResponse>(`${this.apiBaseUrl}/profile/envelope/overview`, { params });
     }
 
@@ -194,5 +204,13 @@ export class ApiService {
 
     deleteAlert(id: number): Observable<MutationResponse> {
         return this.http.delete<MutationResponse>(`${this.apiBaseUrl}/profile/alerts/${id}`);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Projection — POST /projection
+    // ---------------------------------------------------------------------------
+
+    postProjection(data: ProjectionRequest): Observable<ProjectionResponse> {
+        return this.http.post<ProjectionResponse>(`${this.apiBaseUrl}/projection`, data);
     }
 }

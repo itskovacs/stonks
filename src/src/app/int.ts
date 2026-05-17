@@ -61,11 +61,13 @@ export interface TransactionRequest {
 export interface UserSettingsRequest {
     currency?: string | null; // ISO 4217, e.g. "USD" — null to leave unchanged
     apprise_url?: string | null; // comma-separated Apprise URLs — null to leave unchanged
+    dark_mode?: boolean | null;
 }
 
 export interface UserSettingsOut {
     currency: string | null;
     apprise_url: string | null;
+    dark_mode: boolean | null;
 }
 
 export interface AlertRequest {
@@ -399,6 +401,8 @@ export interface WatchlistRow {
     sector: string | null;
     currency: string;
     history_7d: ClosePricePoint[];
+    fifty_two_week_high: number | null;
+    fifty_two_week_low: number | null;
     pre_market_price: number | null;
     pre_market_change: number | null;
     pre_market_change_pct: number | null;
@@ -504,6 +508,7 @@ export interface EnvelopeOverviewResponse {
     stats: EnvelopeStats;
     benchmark_pct: (number | null)[];
     portfolio_pct: (number | null)[];
+    benchmark_ticker: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -529,3 +534,53 @@ export interface TickerSearchResult {
 
 // (re-exported for clarity at call sites)
 export type { NewsItem as NewsResponse };
+
+// ---------------------------------------------------------------------------
+// PROJECTION  POST /api/projection
+// ---------------------------------------------------------------------------
+
+export type DepositFrequency = 'monthly' | 'quarterly' | 'annually';
+
+export interface ProjectionRequest {
+    deposit: number;
+    annual_rate_pct: number;
+    deposit_frequency: DepositFrequency;
+}
+
+export interface ProjectionDataset {
+    label: string;
+    data: number[];
+}
+
+export interface ProjectionChartData {
+    labels: string[];
+    datasets: ProjectionDataset[];
+}
+
+export interface ProjectionMilestone {
+    year: number;
+    total_value: number;
+    total_deposited: number;
+    interest_earned: number;
+}
+
+export interface ProjectionSummary {
+    final_value: number;
+    total_deposited: number;
+    total_interest: number;
+    effective_multiplier: number | null;
+}
+
+export interface ProjectionInputs {
+    initial_balance: number;
+    deposit: number;
+    annual_rate_pct: number;
+    deposit_frequency: DepositFrequency;
+}
+
+export interface ProjectionResponse {
+    chart_data: ProjectionChartData;
+    milestones: ProjectionMilestone[];
+    summary: ProjectionSummary;
+    inputs: ProjectionInputs;
+}

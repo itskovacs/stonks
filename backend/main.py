@@ -17,7 +17,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from config import get_settings
 from db.core import init_and_migrate_db
-from routers import alerts, auth, news, profile, stock
+from routers import alerts, auth, news, profile, projection, stock
 from services.scheduler import check_prices_and_notify
 
 VERSION = "1.1.0"
@@ -63,6 +63,7 @@ app.include_router(stock.router, prefix="/api")
 app.include_router(news.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
+app.include_router(projection.router, prefix="/api")
 
 
 @app.get("/api/")

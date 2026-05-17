@@ -323,10 +323,11 @@ class YFinanceFetcher:
     calls within a single request (e.g. report_builder calls info() 9×).
     """
 
-    def __init__(self, ticker: str) -> None:
+    def __init__(self, ticker: str, force: bool = False) -> None:
         self.ticker = ticker.upper()
         self.yf = yf.Ticker(self.ticker, session=_get_session())
         self._info_cache: dict | None = None
+        self._force = force
 
     # ── Cache primitives ──────────────────────────────────────────────────────
 
@@ -336,6 +337,8 @@ class YFinanceFetcher:
         found=True  means the cache has a live entry (value may be None for sentinels).
         found=False means the entry is absent or expired.
         """
+        if self._force:
+            return False, None
         try:
             conn = _get_conn()
             now = _now_ts()

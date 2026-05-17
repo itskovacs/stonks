@@ -39,6 +39,8 @@ def login(req: LoginRegisterModel, session: SessionDep) -> Token:
 
 @router.post("/register", response_model=Token)
 def register(req: LoginRegisterModel, session: SessionDep) -> Token:
+    if not get_settings().REGISTER_ENABLE:
+        raise HTTPException(status_code=403, detail="Registration is disabled")
     if session.get(User, req.username):
         raise HTTPException(status_code=409, detail="Username already taken")
     session.add(User(username=req.username, hashed_password=hash_password(req.password)))

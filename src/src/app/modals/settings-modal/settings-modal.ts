@@ -45,6 +45,10 @@ export class SettingsModalComponent {
 
     toggleDarkMode(): void {
         this.utilsService.toggleDarkMode();
+        this.apiService
+            .updateSettings({ dark_mode: this.utilsService.darkMode() })
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe();
     }
 
     load(): void {
@@ -59,6 +63,7 @@ export class SettingsModalComponent {
                         currency: settings.currency ?? '',
                         apprise_url: settings.apprise_url ?? '',
                     });
+                    if (settings.dark_mode != null) this.utilsService.applyDarkMode(settings.dark_mode);
                     this.isLoading.set(false);
                 },
                 error: () => this.isLoading.set(false),
@@ -72,6 +77,7 @@ export class SettingsModalComponent {
         const payload = {
             currency: currency.trim() || null,
             apprise_url: apprise_url.trim() || null,
+            dark_mode: this.utilsService.darkMode(),
         };
         this.apiService
             .updateSettings(payload)

@@ -1,7 +1,10 @@
 <div
-    class="max-w-7xl xl:max-w-1/2 mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 bg-primary-50 dark:bg-primary-900 text-primary-900 dark:text-primary-50 font-sans antialiased min-h-screen selection:bg-blue-100 dark:selection:bg-blue-800">
+    class="max-w-7xl xl:max-w-360 2xl:max-w-400 mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 bg-primary-50 dark:bg-primary-900 text-primary-900 dark:text-primary-50 font-sans antialiased min-h-screen selection:bg-blue-100 dark:selection:bg-blue-800">
 
     <section class="flex justify-end items-center mt-0 mb-2 gap-1">
+        <p-button text icon="pi pi-refresh" (click)="forceRefreshDashboard()" [loading]="isChartLoading()" />
+        <p-button text icon="pi pi-bell" (click)="allAlertsModalVisible.set(true)"
+            [severity]="userAlerts().length > 0 ? 'warn' : 'secondary'" />
         <p-button text icon="pi pi-cog" (click)="settingsModalVisible.set(true)" />
     </section>
 
@@ -59,11 +62,11 @@
             </div>
         </div>
 
-        <!-- Net Deposits (multi-period) + Dividends -->
+        <!-- Deposits (multi-period) + Dividends -->
         <div
             class="bg-white dark:bg-primary-800 rounded-lg p-4 shadow-sm ring-1 ring-primary-200 dark:ring-primary-700 flex items-center gap-2 sm:gap-4">
             <div class="flex flex-col gap-1 justify-center flex-1 min-w-0">
-                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-[0.13em]">Net Deposits</p>
+                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-[0.13em]">Deposits</p>
                 <div class="grid gap-2 sm:gap-4 grid-cols-3">
                     @for (entry of depositEntries; track entry.key) {
                     <div class="flex flex-col gap-0.5">
@@ -87,7 +90,7 @@
                     Div. <span class="text-[7px]">(90d)</span></p>
                 <p class="will-change-[filter] text-xs font-bold text-primary-900 dark:text-primary-50 filter-[blur(6px)] [transition:filter_0.2s_ease] hover:filter-[blur(0px)] data-[revealed=true]:filter-[blur(0px)] cursor-pointer select-none"
                     [attr.data-revealed]="isRevealed()" (click)="toggleReveal()">
-                    {{ totals().dividend_income_90d | number:'1.0-0' }}</p>
+                    {{ totals().dividend_income_90d | number:'1.0-0' }} {{ currencySymbol() }}</p>
             </div>
         </div>
     </section>
@@ -141,7 +144,9 @@
         }
 
         <button (click)="openEnvelopeDialog()"
-            class="bg-white border border-dashed border-primary-300 px-6 py-3 rounded-lg flex gap-1.5 justify-center items-center text-primary-400 text-[9px] font-bold uppercase tracking-widest hover:border-primary-500 hover:text-primary-600 hover:bg-primary-50 transition-all duration-200 cursor-pointer outline-none focus:ring-2 focus:ring-primary-200 focus:ring-offset-1 active:scale-[0.98]">
+            class="bg-white dark:bg-primary-800 border border-dashed border-primary-300 dark:border-primary-600 px-6 py-3 rounded-lg flex
+            gap-1.5 justify-center items-center text-primary-400 text-[9px] font-bold uppercase tracking-widest hover:border-primary-500
+            hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-700 dark:hover:text-primary-300 dark:hover:border-primary-500 transition-all duration-200 cursor-pointer outline-none focus:ring-2 focus:ring-primary-200 focus:ring-offset-1 active:scale-[0.98]">
             <i class="pi pi-plus text-[8px]"></i> <span class="hidden sm:flex">Envelope</span>
         </button>
     </section>
@@ -165,7 +170,6 @@
             <div [routerLink]="'ticker/' + item.ticker" class="group relative cursor-pointer outline-none bg-white dark:bg-primary-900
             border border-primary-200 dark:border-primary-700 rounded-md hover:shadow-sm hover:border-primary-300
             dark:hover:border-primary-500 hover:-translate-y-px transition-all duration-180">
-
                 <div class="flex items-start justify-between p-4 pb-0">
                     <div class="flex flex-col flex-1 min-w-0">
                         <h3 class="font-black text-primary-900 dark:text-primary-50 leading-none truncate">{{
@@ -182,15 +186,16 @@
                             {{ item.current_price | number:'1.2-2' }}<span class="text-[9px] font-sans ml-0.5">{{
                                 item.currency }}</span>
                         </p>
-                        <span class="text-[9px] font-bold tabular-nums mt-1"
-                            [class]="item.change_1d_pct >= 0 ? 'text-emerald-600' : 'text-red-500'">
-                            {{ item.change_1d_pct >= 0 ? '+' : '' }}{{ item.change_1d_pct | number:'1.2-2' }}%
-                        </span>
                         @if (item.pre_market_price != null) {
                         <span class="text-[8px] font-bold tabular-nums mt-0.5"
                             [class]="item.pre_market_change! >= 0 ? 'text-emerald-500' : 'text-red-400'">
                             PRE {{ item.pre_market_change! >= 0 ? '+' : '' }}{{ item.pre_market_change_pct! |
                             number:'1.2-2' }}%
+                        </span>
+                        } @else {
+                        <span class="text-[9px] font-bold tabular-nums mt-1"
+                            [class]="item.change_1d_pct >= 0 ? 'text-emerald-600' : 'text-red-500'">
+                            {{ item.change_1d_pct >= 0 ? '+' : '' }}{{ item.change_1d_pct | number:'1.2-2' }}%
                         </span>
                         }
                     </div>
@@ -305,16 +310,16 @@
                             </p>
 
                             <div class="flex items-center justify-end gap-2 mt-1">
-                                <span class="text-[8px] font-bold tabular-nums"
-                                    [class]="item.change_1d_pct >= 0 ? 'text-emerald-600' : 'text-red-500'">
-                                    {{ item.change_1d_pct >= 0 ? '+' : '' }}{{ item.change_1d_pct | number:'1.2-2' }}%
-                                </span>
-
                                 @if (item.pre_market_price != null) {
                                 <span class="text-[7px] font-bold tabular-nums"
                                     [class]="item.pre_market_change! >= 0 ? 'text-emerald-500' : 'text-red-400'">
                                     PRE {{ item.pre_market_change! >= 0 ? '+' : '' }}{{ item.pre_market_change_pct! |
                                     number:'1.2-2' }}%
+                                </span>
+                                } @else {
+                                <span class="text-[8px] font-bold tabular-nums"
+                                    [class]="item.change_1d_pct >= 0 ? 'text-emerald-600' : 'text-red-500'">
+                                    {{ item.change_1d_pct >= 0 ? '+' : '' }}{{ item.change_1d_pct | number:'1.2-2' }}%
                                 </span>
                                 }
                             </div>
@@ -361,8 +366,6 @@
 
     <!-- ── Portfolio Matrix + Ledger ─────────────────────────────────────── -->
     <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-        <!-- Position table -->
         <div
             class="lg:col-span-2 bg-white dark:bg-primary-800 border border-primary-200 dark:border-primary-700 rounded-xl flex flex-col overflow-y-auto max-h-[400px]">
             <div
@@ -594,7 +597,7 @@
                 </p-multiselect>
 
                 <p-multiselect [options]="transactionTypes" [(ngModel)]="selectedTypes" optionLabel="label" size="small"
-                    [pt]="multiSelectPt" optionValue="value" placeholder="Transactions" fluid class="text-xs">
+                    [pt]="multiSelectPt" optionValue="value" placeholder="Types" fluid class="text-xs">
                     <ng-template let-value pTemplate="selectedItems">
                         @if (value && value.length > 0) {
                         <div class="flex items-center gap-1.5">
@@ -658,12 +661,12 @@
                         <div class="flex gap-4 items-center">
                             <div>
                                 @if (trade.type === 'SELL' && trade.realized_pnl != null) {
-                                <div class="flex items-center gap-1.5 mt-1">
-                                    <span class="text-[8px] sm:text-[9px] font-bold px-1 py-px rounded tabular-nums"
-                                        [class]="trade.realized_pnl_pct! >= 0 ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-red-50 text-red-500 dark:bg-red-900/20 dark:text-red-400'">
-                                        {{ trade.realized_pnl_pct! >= 0 ? '+' : '' }}{{ trade.realized_pnl_pct! |
-                                        number:'1.2-2' }}%
-                                    </span>
+                                <div class="flex flex-col justify-center items-center text-[8px] sm:text-[9px] font-bold px-1 py-px rounded tabular-nums"
+                                    [class]="trade.realized_pnl_pct! >= 0 ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-red-50 text-red-500 dark:bg-red-900/20 dark:text-red-400'">
+                                    {{ trade.realized_pnl_pct! >= 0 ? '+' : '' }}{{ trade.realized_pnl_pct! |
+                                    number:'1.2-2' }}%<br>
+                                    <span>{{ trade.realized_pnl | compactNumber:1 }} {{
+                                        currencySymbol() }}</span>
                                 </div>
                                 }
                             </div>
@@ -707,19 +710,25 @@
     <section class="bg-white dark:bg-primary-800 border border-primary-200 dark:border-primary-700 rounded-xl">
         <div
             class="px-5 py-4 flex flex-col gap-1 sm:gap-0 sm:flex-row items-center sm:justify-between border-b border-primary-100 dark:border-primary-700">
-            <div class="flex-1 flex items-center justify-between gap-2 sm:pr-2">
+            <div
+                class="flex-1 flex sm:flex-row flex-col flex-wrap items-center justify-center sm:justify-between gap-2 sm:pr-2">
                 <h2 class="text-sm font-bold text-primary-900 dark:text-primary-50 mb-0">Invested Equity</h2>
 
-                <p-button [text]="!benchmarkMode()" (click)="toggleBenchmark()" [disabled]="!hasChartData()"
-                    icon="pi pi-chart-bar" label="vs MSCI World" size="small" />
+                <div class="flex gap-2 items-center">
+                    <p-button [text]="!projectionMode()" (click)="toggleProjection()"
+                        [disabled]="!hasAnyPortfolioData()" icon="pi pi-chart-line" label="Projection" size="small" />
+                    <p-button [text]="!benchmarkMode()" (click)="toggleBenchmark()"
+                        [disabled]="!hasChartData() || projectionMode()" icon="pi pi-chart-bar" label="Benchmark"
+                        size="small" />
+                </div>
             </div>
 
             <div class="flex items-center gap-2 sm:border-l border-primary-300 sm:pl-2">
                 <div class="flex items-center p-1 rounded-md text-xs font-bold text-primary-600 dark:text-primary-300">
                     @for (range of timeRanges(); track range.label) {
                     <button (click)="setTimeRange(range.label)"
-                        class="px-3 py-1.5 rounded cursor-pointer transition-colors"
-                        [disabled]="isChartLoading() || !hasAnyPortfolioData()"
+                        class="px-3 py-1.5 rounded cursor-pointer transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                        [disabled]="isChartLoading() || !hasAnyPortfolioData() || projectionMode()"
                         [class]="range.active ? 'bg-white text-blue-600 shadow-sm ring-1 ring-primary-100 dark:bg-primary-700 dark:text-blue-400 dark:ring-primary-700' : 'hover:bg-primary-50 hover:text-primary-900 dark:hover:bg-primary-700 dark:hover:text-primary-50'">@if
                         (range.active && isChartLoading()) {
                         <i class="pi pi-spinner pi-spin text-blue-500 text-[10px]"></i> } @else { {{ range.label }} }
@@ -748,22 +757,48 @@
         </div>
 
         } @else {
+        <!-- Projection inputs — shown instead of legend row when projection mode is active -->
+        @if (projectionMode()) {
+        <div class="mt-2 sm:mt-4 flex flex-col gap-2 items-center">
+            @if (isProjectionLoading()) {
+            <i class="pi pi-spinner pi-spin text-primary-400 self-center mb-1"></i>
+            } @else if (projectionData()?.inputs; as inp) {
+            <span class="text-xs text-primary-400 text-center">
+                Starting from {{ inp.initial_balance | number:'1.0-0' }} {{ currencySymbol() }}
+            </span>
+            }
+            <div [formGroup]="projectionForm"
+                class="pb-3 flex flex-wrap justify-center items-center gap-4 border-b border-primary-100 dark:border-primary-700">
+                <div class="flex flex-col gap-1">
+                    <label class="text-[9px] font-bold text-primary-400 uppercase tracking-wider">Deposit</label>
+                    <p-inputnumber formControlName="deposit" [min]="0" [maxFractionDigits]="0" size="small" />
+                </div>
+                <div class="flex flex-col gap-1">
+                    <label class="text-[9px] font-bold text-primary-400 uppercase tracking-wider">Frequency</label>
+                    <p-select [options]="frequencyOptions" formControlName="deposit_frequency" optionLabel="label"
+                        optionValue="value" size="small" />
+                </div>
+                <div class="flex flex-col gap-1">
+                    <label class="text-[9px] font-bold text-primary-400 uppercase tracking-wider">Annual Rate</label>
+                    <p-inputnumber formControlName="annual_rate_pct" [min]="0" [max]="100" [maxFractionDigits]="1"
+                        size="small" suffix="%" />
+                </div>
+            </div>
+        </div>
+        }
 
         <!-- Legend row — hidden while loading to avoid stale labels flashing -->
-        @if (!isChartLoading() && chartSeries().length) {
+        @if (chartSeries().length && !projectionMode()) {
         <div class="px-6 pt-5 pb-1 flex flex-wrap items-center gap-x-6 gap-y-3">
             @if (benchmarkMode()) {
-            <div class="flex items-center gap-2 cursor-default">
-                <span class="w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-primary-800 shadow-sm"
-                    style="background-color: #3b82f6"></span>
-                <span
-                    class="text-[11px] font-semibold text-primary-600 dark:text-primary-400 uppercase tracking-wide">Portfolio</span>
-            </div>
-            <div class="flex items-center gap-2 cursor-default">
-                <span class="w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-primary-800 shadow-sm"
-                    style="background-color: #f59e0b"></span>
-                <span
-                    class="text-[11px] font-semibold text-primary-600 dark:text-primary-400 uppercase tracking-wide">WPEA.PA</span>
+            <div class="flex items-center justify-center mx-auto flex-wrap gap-2">
+                <span>Compare</span>
+                <p-multiselect [options]="envelopes()" [ngModel]="selectedBenchmarkEnvelopes()"
+                    (ngModelChange)="setBenchmarkEnvelopes($event)" optionLabel="name" placeholder="All envelopes"
+                    [maxSelectedLabels]="2" selectedItemsLabel="{0} envelopes" size="small" />
+                <span>To</span>
+                <p-select [options]="benchmarkOptions" [ngModel]="selectedBenchmarkTicker()"
+                    (ngModelChange)="setBenchmarkTicker($event)" optionLabel="label" optionValue="value" size="small" />
             </div>
             } @else {
             @for (series of chartSeries(); track series.name) {
@@ -782,9 +817,9 @@
 
         <!-- Chart body — dims while loading; swapped for a message when no period data -->
         <div class="pl-2 pb-2 w-full h-[350px] relative transition-opacity duration-300"
-            [class.opacity-40]="isChartLoading()">
+            [class.opacity-40]="isChartLoading() || isProjectionLoading()">
 
-            @if (!isChartLoading() && !hasChartData()) {
+            @if (!isChartLoading() && !hasChartData() && !projectionMode()) {
             <!-- ── Case B: Data exists but not for this period ────────────── -->
             <div class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
                 <i class="pi pi-calendar-times text-primary-200 dark:text-primary-700 text-2xl"></i>
@@ -798,6 +833,20 @@
             }
         </div>
 
+        <!-- Projection milestone strip -->
+        @if (projectionMode() && projectionData()) {
+        <div
+            class="px-6 py-3 border-t border-primary-100 dark:border-primary-700 flex justify-center flex-wrap gap-x-8 gap-y-2">
+            @for (m of projectionData()!.milestones; track m.year) {
+            <div class="flex flex-col gap-0.5">
+                <span class="text-[8px] font-bold text-primary-400 uppercase tracking-widest">Yr {{ m.year }}</span>
+                <span class="text-xs font-black tabular-nums text-primary-900 dark:text-primary-50">
+                    {{ m.total_value | compactNumber:1 }} {{ currencySymbol() }}
+                </span>
+            </div>
+            }
+        </div>
+        }
         }
     </section>
 </div>
@@ -865,7 +914,7 @@
 
     <div class="flex flex-col items-center justify-center gap-1 mt-2 mb-4">
         <p class="text-sm text-primary-500 dark:text-primary-400">
-            {{ transactionMode() === 'form' ? 'Record a new trade, deposit, or withdrawal.' : 'Paste multiple
+            {{ transactionMode() === 'form' ? 'Record a new trade, deposit or withdrawal.' : 'Paste multiple
             transactions in text format.' }}
         </p>
 
@@ -993,6 +1042,28 @@
                 [maxFractionDigits]="2" pSize="small" />
             <label for="tx-amount">Amount</label>
         </p-floatlabel>
+        }
+
+        @if (transactionForm.controls.type.value === 'BUY') {
+        <div class="flex items-center gap-2.5">
+            <p-checkbox inputId="auto-deposit" [binary]="true" [formControl]="autoDepositCheckboxControl" />
+            <label for="auto-deposit"
+                class="flex items-center gap-1 text-sm leading-tight cursor-pointer select-none text-surface-600 dark:text-surface-400">
+                <span>Also create a <i>DEPOSIT</i> for this purchase</span>
+                @if (autoDepositComputed() > 0) {
+                <span class="font-mono tabular-nums text-xs text-primary-400 dark:text-primary-500">
+                    ({{ autoDepositComputed() | number:'1.2-2' }} {{ currencySymbol() }})
+                </span>
+                }
+            </label>
+        </div>x
+        @if (autoDeposit()) {
+        <p-floatlabel variant="in">
+            <p-inputNumber inputId="auto-deposit-amount" [formControl]="autoDepositAmountControl" mode="decimal"
+                [minFractionDigits]="2" [maxFractionDigits]="2" fluid pSize="small" />
+            <label for="auto-deposit-amount">Deposit amount</label>
+        </p-floatlabel>
+        }
         }
 
         <!-- Optional note (max 500 chars per API spec) -->
@@ -1195,9 +1266,5 @@
 }
 
 <app-alerts-modal [(visible)]="alertsModalVisible" [ticker]="alertsModalTicker()!" (changed)="onAlertChanged()" />
+<app-all-alerts-modal [(visible)]="allAlertsModalVisible" (changed)="onAlertChanged()" />
 <app-settings-modal [(visible)]="settingsModalVisible" (saved)="onSettingsSaved($event)" />
-
-<div class="flex flex-col gap-1 items-center justify-center text-sm mb-4">
-    <span>Made with ❤️ in BZH</span>
-    <span class="text-primary-500 dark:text-primary-700"><i class="pi pi-github text-sm!"></i> itskovacs/STONKS</span>
-</div>

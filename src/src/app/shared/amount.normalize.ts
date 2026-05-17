@@ -2,7 +2,7 @@ import { Pipe, PipeTransform } from '@angular/core';
 
 @Pipe({
     name: 'compactNumber',
-    standalone: true, // Remove this line if you are using NgModules instead of standalone components
+    standalone: true,
 })
 export class CompactNumberPipe implements PipeTransform {
     transform(value: number | string | null | undefined, maxFractionDigits: number = 0): string {

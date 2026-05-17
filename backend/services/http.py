@@ -16,4 +16,3 @@ def get_trending() -> list[str]:
         return [q['symbol'] for q in quotes]
     except Exception:
         return []
-

@@ -25,11 +25,14 @@ def check_prices_and_notify():
             return
 
         prices: dict[str, float] = {}
+        currencies: dict[str, str] = {}
         for sym in symbols:
             try:
-                price = yf.Ticker(sym).fast_info["lastPrice"]
+                ticker = yf.Ticker(sym).fast_info
+                price = ticker.get("lastPrice", 0)
                 if price is not None:
                     prices[sym] = float(price)
+                    currencies[sym] = ticker.get("currency") or ""
             except Exception:
                 log.warning("Failed to fetch live price for %s", sym)
 
@@ -65,9 +68,11 @@ def check_prices_and_notify():
                                 url = url.strip()
                                 if url:
                                     ap_obj.add(url)
+                            currency = currencies.get(alert.ticker, "")
+                            direction = 'above' if alert.trigger_above else 'below'
                             ap_obj.notify(
-                                title=f"{alert.ticker} Alert Triggered",
-                                body=f"{alert.ticker} hit {price:.2f} (Target: {alert.target_price:.2f})",
+                                title=f"{alert.ticker} {direction} {alert.target_price:.2f}",
+                                body=f"{alert.ticker} crossed {direction} target price of {alert.target_price:.2f}, currently at {price:.2f} {currency}",
                             )
                     except Exception as e:
                         session.rollback()

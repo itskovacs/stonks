@@ -199,7 +199,8 @@ def compute_sell_pnl(txs: list[dict]) -> dict[int, dict]:
         else:
             if h["shares"] > 1e-9 and tx.get("id") is not None:
                 wac              = h["cost_basis"] / h["shares"]
-                cost_of_sale     = round(wac * shares, 2)
+                effective_shares = min(shares, h["shares"])
+                cost_of_sale     = round(wac * effective_shares, 2)
                 realized_pnl     = round(total - cost_of_sale, 2)
                 realized_pnl_pct = round(realized_pnl / cost_of_sale * 100, 2) if cost_of_sale else 0.0
                 result[tx["id"]] = {"realized_pnl": realized_pnl, "realized_pnl_pct": realized_pnl_pct}
@@ -386,6 +387,8 @@ def compute_envelope_overview(
     txs: list[dict],
     envelopes: list[dict],
     period: str = "3mo",
+    benchmark_ticker: str = "XWD.TO",
+    envelope_filter: list[str] | None = None,
 ) -> dict:
     """
     Reconstructs daily mark-to-market equity values for the requested period.
@@ -424,10 +427,27 @@ def compute_envelope_overview(
 
     if not txs:
         return {"period": period, "dates": [], "series": [], "events": [], "stats": empty_stats,
-                "benchmark_pct": [], "portfolio_pct": []}
+                "benchmark_pct": [], "portfolio_pct": [], "benchmark_ticker": benchmark_ticker}
 
     sorted_txs    = sorted(txs, key=lambda x: x["date"])
-    envelope_names = [env["name"] for env in envelopes]
+    envelope_names = [
+        env["name"] for env in envelopes
+        if envelope_filter is None or env["name"] in envelope_filter
+    ]
+    envelopes = [env for env in envelopes if env["name"] in envelope_names]
+
+    # Pre-filter capital transactions to the selected envelopes so that the
+    # benchmark mirror and cumulative_capital are scoped identically to the
+    # portfolio series (avoids numerator/denominator mismatch when a subset
+    # of envelopes is selected).
+    _INFLOW  = {"DEPOSIT", "DIVIDEND"}
+    _OUTFLOW = {"WITHDRAW"}
+    _capital_types = _INFLOW | _OUTFLOW
+    scoped_capital_txs = [
+        tx for tx in sorted_txs
+        if tx["type"] in _capital_types
+        and (envelope_filter is None or tx.get("envelope_name") in envelope_filter)
+    ]
 
     equity_tickers = list({
         tx["ticker"].upper()
@@ -435,13 +455,12 @@ def compute_envelope_overview(
         if tx.get("ticker") and tx["ticker"].strip() and tx["type"] in ("BUY", "SELL")
     })
 
-    # Fetch equity tickers and WPEA.PA benchmark in one parallel pool.
-    # WPEA.PA is fetched from the user's first-ever capital transaction so that
-    # the pre-window mirror replay has prices for all historical deposits.
-    _BENCHMARK = "WPEA.PA"
-    _capital_types = {"DEPOSIT", "DIVIDEND", "WITHDRAW"}
+    # Fetch equity tickers and the benchmark in one parallel pool.
+    # The benchmark is fetched from the selected envelopes' first-ever capital
+    # transaction so the pre-window mirror replay has prices for all deposits.
+    _BENCHMARK = benchmark_ticker
     first_capital_str = next(
-        (tx["date"][:10] for tx in sorted_txs if tx["type"] in _capital_types),
+        (tx["date"][:10] for tx in scoped_capital_txs),
         chart_start_str,
     )
     all_fetch_tickers = equity_tickers + [_BENCHMARK]
@@ -483,7 +502,7 @@ def compute_envelope_overview(
 
     closes = pd.DataFrame(equity_frames).bfill().ffill() if equity_frames else pd.DataFrame()
 
-    # If the user holds WPEA.PA as an equity position, inject it into closes
+    # If the user holds XWD.TO as an equity position, inject it into closes
     # aligned to the existing trading-day index so the Euronext calendar does
     # not pollute trading_days with Paris-only market days.
     if wpea_col is not None and _BENCHMARK in equity_tickers and not closes.empty:
@@ -563,11 +582,15 @@ def compute_envelope_overview(
         {"name": env["name"], "color": env["color"], "values": series_data[env["name"]]}
         for env in envelopes
     ]
-    stats = _compute_stats(daily_pure_changes, txs, envelopes, chart_start_str, period_days)
+    scoped_txs = (
+        [tx for tx in txs if tx.get("envelope_name") in envelope_filter]
+        if envelope_filter is not None else txs
+    )
+    stats = _compute_stats(daily_pure_changes, scoped_txs, envelopes, chart_start_str, period_days)
 
-    # Benchmark: cash-flow mirror comparison vs WPEA.PA.
+    # Benchmark: cash-flow mirror comparison vs XWD.TO.
     # For every DEPOSIT/DIVIDEND the user recorded, the mirror hypothetically buys
-    # that same amount of WPEA.PA at the day's price.  WITHDRAW reduces the mirror
+    # that same amount of XWD.TO at the day's price.  WITHDRAW reduces the mirror
     # proportionally.  Both portfolio_pct and benchmark_pct are then expressed as
     # % return on net capital deployed (capital_in = DEPOSIT + DIVIDEND - WITHDRAW),
     # giving a true apples-to-apples comparison for a DCA investor.
@@ -580,18 +603,13 @@ def compute_envelope_overview(
             for i in range(len(dates))
         ]
 
-        _INFLOW  = {"DEPOSIT", "DIVIDEND"}
-        _OUTFLOW = {"WITHDRAW"}
-
         # Step 1 — replay pre-window capital flows to build opening mirror state
         mirror_shares: float     = 0.0
         cumulative_capital: float = 0.0
 
-        for tx in sorted_txs:
+        for tx in scoped_capital_txs:
             if tx["date"][:10] >= chart_start_str:
                 break
-            if tx["type"] not in (_INFLOW | _OUTFLOW):
-                continue
             amount = float(tx.get("total") or 0.0)
             wpea_at_tx = wpea_col.loc[:pd.Timestamp(tx["date"][:10])].dropna()
             if wpea_at_tx.empty:
@@ -606,9 +624,8 @@ def compute_envelope_overview(
 
         # Step 2 — walk chart window, snapshotting mirror state at each trading day
         in_window_capital = [
-            tx for tx in sorted_txs
+            tx for tx in scoped_capital_txs
             if tx["date"][:10] >= chart_start_str
-            and tx["type"] in (_INFLOW | _OUTFLOW)
         ]
         cf_idx = 0
 
@@ -649,4 +666,5 @@ def compute_envelope_overview(
             portfolio_pct.append(round((total_values[i] / cap - 1) * 100, 4))
 
     return {"period": period, "dates": dates, "series": series, "events": events, "stats": stats,
-            "benchmark_pct": benchmark_pct, "portfolio_pct": portfolio_pct}
+            "benchmark_pct": benchmark_pct, "portfolio_pct": portfolio_pct,
+            "benchmark_ticker": benchmark_ticker}

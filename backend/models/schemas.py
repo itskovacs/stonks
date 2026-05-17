@@ -24,6 +24,12 @@ class TransactionType(StrEnum):
     DIVIDEND = "DIVIDEND"
 
 
+class DepositFrequency(StrEnum):
+    MONTHLY   = "monthly"
+    QUARTERLY = "quarterly"
+    ANNUALLY  = "annually"
+
+
 # =============================================================================
 # AUTH
 # =============================================================================
@@ -104,6 +110,7 @@ class TransactionRequest(BaseModel):
 class UserSettingsRequest(BaseModel):
     currency: str | None = Field(default=None, min_length=1, max_length=10, description="Currency symbol, e.g. €, $, £")
     apprise_url: str | None = Field(default=None, description="Comma-separated Apprise notification URLs")
+    dark_mode: bool | None = Field(default=None)
 
 
 class UserSettingsOut(BaseModel):
@@ -111,6 +118,7 @@ class UserSettingsOut(BaseModel):
 
     currency: str | None
     apprise_url: str | None
+    dark_mode: bool | None
 
 
 # =============================================================================
@@ -441,6 +449,8 @@ class WatchlistRow(BaseModel):
     sector: str | None
     currency: str
     history_7d: list[ClosePricePoint]
+    fifty_two_week_high: float | None = None
+    fifty_two_week_low: float | None = None
     pre_market_price: float | None = None
     pre_market_change: float | None = None
     pre_market_change_pct: float | None = None
@@ -547,6 +557,7 @@ class EnvelopeOverviewResponse(BaseModel):
     stats: EnvelopeStats
     benchmark_pct: list[float | None] = []
     portfolio_pct: list[float | None] = []
+    benchmark_ticker: str = "XWD.TO"
 
 
 # =============================================================================
@@ -566,3 +577,52 @@ class TickerSearchResult(BaseModel):
     exchange: str | None
     # Instrument category: EQUITY, ETF, MUTUALFUND, INDEX
     quote_type: str
+
+
+# =============================================================================
+# PROJECTION
+# =============================================================================
+
+
+class ProjectionRequest(BaseModel):
+    deposit:           float = Field(ge=0.0, default=0.0)
+    annual_rate_pct:   float = Field(ge=0.0, le=100.0)
+    deposit_frequency: DepositFrequency = DepositFrequency.MONTHLY
+
+
+class ProjectionDataset(BaseModel):
+    label: str
+    data:  list[float]
+
+
+class ProjectionChartData(BaseModel):
+    labels:   list[str]
+    datasets: list[ProjectionDataset]
+
+
+class ProjectionMilestone(BaseModel):
+    year:             int
+    total_value:      float
+    total_deposited:  float
+    interest_earned:  float
+
+
+class ProjectionSummary(BaseModel):
+    final_value:          float
+    total_deposited:      float
+    total_interest:       float
+    effective_multiplier: float | None
+
+
+class ProjectionInputs(BaseModel):
+    initial_balance:   float
+    deposit:           float
+    annual_rate_pct:   float
+    deposit_frequency: DepositFrequency
+
+
+class ProjectionResponse(BaseModel):
+    chart_data: ProjectionChartData
+    milestones: list[ProjectionMilestone]
+    summary:    ProjectionSummary
+    inputs:     ProjectionInputs

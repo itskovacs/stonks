@@ -87,6 +87,8 @@ def _macd_signal(df: pd.DataFrame) -> IndicatorResult:
         return None, None
     hist_now = float(hist.iloc[-1])
     hist_prev = float(hist.iloc[-2])
+    if np.isnan(hist_now) or np.isnan(hist_prev):
+        return None, None
     if macd > sig and hist_now > hist_prev:
         return "BUY", None
     if macd < sig and hist_now < hist_prev:

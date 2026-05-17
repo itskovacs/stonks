@@ -52,6 +52,7 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     currency: str | None
     apprise_url: str | None = Field(default=None, description="Comma-separated Apprise URLs")
+    dark_mode: bool | None
 
     watchlist_items: list["WatchlistItem"] = Relationship(
         back_populates="owner", cascade_delete=True

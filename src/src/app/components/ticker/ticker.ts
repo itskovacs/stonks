@@ -239,7 +239,7 @@ export class TickerComponent {
         if (!prices || prices.length == 0) return NaN;
         const first = prices[0].close;
         const last = prices[prices.length - 1].close;
-        return (last * 100) / first - 100;
+        return first === 0 ? NaN : (last * 100) / first - 100;
     });
 
     setChartPeriod(value: ChartPeriod): void {
@@ -248,8 +248,13 @@ export class TickerComponent {
         this.chartPeriodTrigger$.next(value);
     }
 
+    private pendingRaf = 0;
+
     constructor() {
-        this.destroyRef.onDestroy(() => this.chartInstance?.destroy());
+        this.destroyRef.onDestroy(() => {
+            cancelAnimationFrame(this.pendingRaf);
+            this.chartInstance?.destroy();
+        });
 
         effect(() => {
             const data = this.chartData();
@@ -257,8 +262,9 @@ export class TickerComponent {
             const canvasRef = this.chartCanvas();
             const isDarkMode = this.isDarkMode();
 
-            if (data && report && canvasRef?.nativeElement) {
-                requestAnimationFrame(() =>
+            if (data && report && canvasRef?.nativeElement && data.ticker.toUpperCase() === report.stock_bar.ticker) {
+                cancelAnimationFrame(this.pendingRaf);
+                this.pendingRaf = requestAnimationFrame(() =>
                     this.renderChart(canvasRef.nativeElement, data, report.stock_bar.currency, isDarkMode),
                 );
             }
@@ -275,7 +281,7 @@ export class TickerComponent {
     ): void {
         if (this.chartInstance) this.chartInstance.destroy();
         const ctx = canvas.getContext('2d');
-        if (!ctx || !chartResponse.prices.length) return;
+        if (!ctx || chartResponse.prices.length < 2) return;
 
         const gridColor = isDarkMode ? '#3f3f46' : '#f1f5f9';
         const tickColor = isDarkMode ? '#a1a1aa' : '#64748b';
@@ -285,6 +291,21 @@ export class TickerComponent {
         const { prices, annotations } = chartResponse;
         const labels = prices.map((p) => p.date);
         const closes = prices.map((p) => p.close);
+
+        const formatChartLabel = (label: string): string => {
+            if (!label.includes('T')) return label;
+            const d = new Date(label);
+            if (isNaN(d.getTime())) return label;
+            const time = d.toLocaleTimeString(navigator.language, {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+            });
+            if (chartResponse.interval === '5m') return time;
+            if (chartResponse.interval === '15m')
+                return d.toLocaleDateString(navigator.language, { weekday: 'short' }) + ' ' + time;
+            return d.toLocaleDateString(navigator.language, { month: 'short', day: 'numeric' });
+        };
 
         // Map annotation dates to the closest price index
         const annotationColor: Record<string, string> = {
@@ -352,7 +373,7 @@ export class TickerComponent {
 
                     const point = meta.data[idx];
                     const y = point.y;
-                    const x = meta.data[idx].x;
+                    const x = point.x;
 
                     anns.forEach((ann, i) => {
                         const color = annotationColor[ann.type] ?? '#94a3b8';
@@ -450,6 +471,7 @@ export class TickerComponent {
                             maxTicksLimit: 8,
                             color: tickColor,
                             font: { family: 'Inter, ui-sans-serif, system-ui, sans-serif', size: 10, weight: 500 },
+                            callback: (value) => formatChartLabel(labels[value as number] ?? ''),
                         },
                         border: { display: false },
                     },
@@ -505,7 +527,7 @@ export class TickerComponent {
                 <div class="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-sm border border-slate-200/60 dark:border-zinc-700/60 shadow-xl rounded-xl p-3 w-[200px]">
                 <div class="flex justify-between items-center mb-1">
                     <div class="flex flex-col items-start gap-1">
-                    <p class="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-widest">${tooltip.title[0] ?? ''}</p>
+                    <p class="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-widest">${formatChartLabel(tooltip.title[0] ?? '')}</p>
                     <span class="text-xs font-bold text-slate-900 dark:text-zinc-50">${fmt(close)}</span>
                     </div>
 

@@ -62,9 +62,9 @@ _SEMAPHORE = asyncio.Semaphore(5)
 # User settings
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _semaphore_threadpool(t: str):
+async def _semaphore_threadpool(t: str, force: bool = False):
     async with _SEMAPHORE:
-        return await run_in_threadpool(_fetch_ticker_snapshot, t)
+        return await run_in_threadpool(_fetch_ticker_snapshot, t, force)
 
 @router.get("/settings", response_model=UserSettingsOut, summary="Get current user settings")
 def get_settings(
@@ -89,7 +89,9 @@ def update_settings(
     if req.currency is not None:
         user.currency = req.currency
     if req.apprise_url is not None:
-        user.apprise_url = req.apprise_url or None  # empty string → None
+        user.apprise_url = req.apprise_url or None
+    if req.dark_mode is not None:
+        user.dark_mode = req.dark_mode
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -143,9 +145,9 @@ def _tx_dict(tx: Transaction) -> dict:
     }
 
 
-def _fetch_ticker_snapshot(ticker: str) -> dict:
+def _fetch_ticker_snapshot(ticker: str, force: bool = False) -> dict:
     """Lightweight price fetch for dashboard rows. Runs in a threadpool."""
-    f = YFinanceFetcher(ticker)
+    f = YFinanceFetcher(ticker, force=force)
     info = f.info()
     current = f.get_float("currentPrice") or f.get_float("regularMarketPrice") or 0.0
     prev    = f.get_float("previousClose") or f.get_float("regularMarketPreviousClose") or 0.0
@@ -163,6 +165,9 @@ def _fetch_ticker_snapshot(ticker: str) -> dict:
     pre_chg   = round(pre_price - prev, 4) if (pre_price and prev) else None
     pre_pct   = round(pre_chg / prev * 100, 2) if (pre_chg is not None and prev) else None
 
+    high52 = info.get("fiftyTwoWeekHigh")
+    low52  = info.get("fiftyTwoWeekLow")
+
     return {
         "ticker":                ticker,
         "name":                  info.get("shortName") or info.get("longName") or ticker,
@@ -173,6 +178,8 @@ def _fetch_ticker_snapshot(ticker: str) -> dict:
         "sector":                info.get("sector"),
         "currency":              info.get("currency", "USD"),
         "history_7d":            history_7d,
+        "fifty_two_week_high":   round(float(high52), 4) if high52 is not None else None,
+        "fifty_two_week_low":    round(float(low52), 4) if low52 is not None else None,
         "pre_market_price":      pre_price,
         "pre_market_change":     pre_chg,
         "pre_market_change_pct": pre_pct,
@@ -184,6 +191,7 @@ def _fallback_snapshot(ticker: str) -> dict:
         "ticker": ticker, "name": ticker, "current_price": 0.0,
         "prev_close": 0.0, "change_1d": 0.0, "change_1d_pct": 0.0,
         "sector": None, "currency": "USD", "history_7d": [],
+        "fifty_two_week_high": None, "fifty_two_week_low": None,
         "pre_market_price": None, "pre_market_change": None, "pre_market_change_pct": None,
     }
 
@@ -201,6 +209,7 @@ def _fallback_snapshot(ticker: str) -> dict:
 async def get_dashboard(
     session: SessionDep,
     current_user: Annotated[str, Depends(get_current_username)],
+    force_refresh: bool = Query(False),
 ):
     # ── 1. Load from DB ───────────────────────────────────────────────────────
     watchlist_items = session.exec(
@@ -234,7 +243,7 @@ async def get_dashboard(
         watchlist_tickers + [p["ticker"] for p in raw_positions]
     ))
     snapshots = await asyncio.gather(
-        *[_semaphore_threadpool(t) for t in unique_tickers],
+        *[_semaphore_threadpool(t, force_refresh) for t in unique_tickers],
         return_exceptions=True,
     )
     price_map: dict[str, dict] = {
@@ -284,6 +293,7 @@ async def get_dashboard(
 
     # ── 5. Envelope summaries ─────────────────────────────────────────────────
     env_capital_in: dict[str, float] = {e.name: 0.0 for e in envelopes}
+    # DIVIDEND is used in capital_in because it also includes bonuses that are paid directly to accounts
     for tx in txs_dict:
         if tx["type"] in ("DEPOSIT", "DIVIDEND"):
             env_capital_in[tx["envelope_name"]] = env_capital_in.get(tx["envelope_name"], 0.0) + tx["total"]
@@ -412,6 +422,8 @@ async def get_portfolio_overview(
     session: SessionDep,
     current_user: Annotated[str, Depends(get_current_username)],
     period: str = Query("1y", pattern=r"^(1w|1mo|3mo|6mo|ytd|1y|3y)$"),
+    benchmark: str = Query("XWD.TO", max_length=20),
+    envelope_ids: list[int] | None = Query(default=None),
 ):
     txs_orm = session.exec(
         select(Transaction)
@@ -423,10 +435,28 @@ async def get_portfolio_overview(
         select(Envelope).where(Envelope.user == current_user)
     ).all()
 
-    txs_dict = [_tx_dict(tx) for tx in txs_orm]
-    envelopes_meta = [{"name": e.name, "color": e.color} for e in envelopes]
+    selected_envelopes = (
+        [e for e in envelopes if e.id in envelope_ids]
+        if envelope_ids
+        else list(envelopes)
+    )
+    envelope_filter = (
+        [e.name for e in selected_envelopes]
+        if envelope_ids
+        else None
+    )
 
-    return await run_in_threadpool(compute_envelope_overview, txs_dict, envelopes_meta, period)
+    txs_dict = [_tx_dict(tx) for tx in txs_orm]
+    envelopes_meta = [{"name": e.name, "color": e.color} for e in selected_envelopes]
+
+    return await run_in_threadpool(
+        compute_envelope_overview,
+        txs_dict,
+        envelopes_meta,
+        period,
+        benchmark.strip().upper(),
+        envelope_filter,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

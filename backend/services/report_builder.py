@@ -344,13 +344,17 @@ def _build_kpi_strip(f: YFinanceFetcher) -> list[dict]:
     ]
 
 
-def _build_price_chart(f: YFinanceFetcher, hist: pd.DataFrame) -> dict:
+def _build_price_chart(f: YFinanceFetcher, hist: pd.DataFrame, interval: str = "1d") -> dict:
+    _intraday = interval in ("5m", "15m")
+    def _ts(ts: pd.Timestamp) -> str:
+        return ts.strftime("%Y-%m-%dT%H:%M") if _intraday else str(ts.date())
+
     prices: list[dict] = []
     if not hist.empty:
         for dt, row in hist.iterrows():
             prices.append(
                 {
-                    "date":   str(dt.date()),
+                    "date":   _ts(dt),
                     "open":   round(float(row.get("Open", 0)), 4),
                     "high":   round(float(row.get("High", 0)), 4),
                     "low":    round(float(row.get("Low", 0)), 4),
@@ -367,8 +371,8 @@ def _build_price_chart(f: YFinanceFetcher, hist: pd.DataFrame) -> dict:
         hi_idx = hist["High"].idxmax()
         lo_idx = hist["Low"].idxmin()
         annotations += [
-            {"date": str(hi_idx.date()), "label": f"High: {hist['High'][hi_idx]:.2f} {currency}", "type": "high"},
-            {"date": str(lo_idx.date()), "label": f"Low: {hist['Low'][lo_idx]:.2f} {currency}",  "type": "low"},
+            {"date": _ts(hi_idx), "label": f"High: {hist['High'][hi_idx]:.2f} {currency}", "type": "high"},
+            {"date": _ts(lo_idx), "label": f"Low: {hist['Low'][lo_idx]:.2f} {currency}",   "type": "low"},
         ]
 
     def _strip_tz(ts: object) -> pd.Timestamp:
@@ -847,4 +851,4 @@ def build_price_chart_for_period(ticker: str, yf_period: str, yf_interval: str) 
     """Thin wrapper used by the /chart endpoint."""
     f = YFinanceFetcher(ticker)
     hist = f.history(period=yf_period, interval=yf_interval)
-    return _build_price_chart(f, hist)
+    return _build_price_chart(f, hist, yf_interval)

@@ -40,16 +40,19 @@ import { TextareaModule } from 'primeng/textarea';
 import { TableModule } from 'primeng/table';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { MultiSelectModule } from 'primeng/multiselect';
+import { CheckboxModule } from 'primeng/checkbox';
 import { ApiService } from '../../services/api.service';
 import { UtilsService } from '../../services/utils.service';
 import {
     AlertOut,
     ClosePricePoint,
     DashboardTotals,
+    DepositFrequency,
     EnvelopeSeriesLine,
     EnvelopeSummary,
     EnvelopeStats,
     OverviewPeriod,
+    ProjectionResponse,
     TickerSearchResult,
     TransactionOut,
     TransactionType,
@@ -59,16 +62,12 @@ import {
 } from '../../int';
 import { CompactNumberPipe } from '../../shared/amount.normalize';
 import { AlertsModalComponent } from '../../modals/alerts-modal/alerts-modal';
+import { AllAlertsModalComponent } from '../../modals/all-alerts-modal/all-alerts-modal';
 import { SettingsModalComponent } from '../../modals/settings-modal/settings-modal';
 import { DialogService } from 'primeng/dynamicdialog';
 import { YesNoModalComponent } from '../../modals/yes-no-modal/yes-no-modal.component';
 
 Chart.register(...registerables);
-
-// ---------------------------------------------------------------------------
-// Transaction type display config — keyed on the full TransactionType union
-// so the compiler will flag any missing member.
-// ---------------------------------------------------------------------------
 type TxDisplayConfig = { color: string; letter: string; displayValue: string; class: string };
 
 @Component({
@@ -94,7 +93,9 @@ type TxDisplayConfig = { color: string; letter: string; displayValue: string; cl
         SkeletonModule,
         CompactNumberPipe,
         AlertsModalComponent,
+        AllAlertsModalComponent,
         SettingsModalComponent,
+        CheckboxModule,
     ],
     templateUrl: './dashboard.html',
     styleUrls: ['./dashboard.scss'],
@@ -106,6 +107,20 @@ export class DashboardComponent {
     private readonly dialogService = inject(DialogService);
 
     // ── Static config ─────────────────────────────────────────────────────────
+
+    readonly benchmarkOptions = [
+        { label: 'MSCI World (XWD.TO)', value: 'XWD.TO' },
+        { label: 'S&P 500 (^GSPC)', value: '^GSPC' },
+        { label: 'MSCI EM (EEM)', value: 'EEM' },
+        { label: 'NASDAQ 100 (^NDX)', value: '^NDX' },
+        { label: 'Euro Stoxx 50', value: '^STOXX50E' },
+    ];
+
+    readonly frequencyOptions: Array<{ label: string; value: DepositFrequency }> = [
+        { label: 'Monthly', value: 'monthly' },
+        { label: 'Quarterly', value: 'quarterly' },
+        { label: 'Annually', value: 'annually' },
+    ];
 
     readonly transactionTypes = this.utilsService.transactionTypes;
     readonly txConfig: Record<TransactionType, TxDisplayConfig> = {
@@ -162,16 +177,28 @@ export class DashboardComponent {
     readonly isRevealed = signal(false);
     readonly isChartLoading = signal(false);
     readonly benchmarkMode = signal(false);
-    private readonly refreshTrigger$ = new Subject<void>();
+    readonly projectionMode = signal(false);
+    readonly projectionData = signal<ProjectionResponse | null>(null);
+    readonly isProjectionLoading = signal(false);
+    readonly selectedBenchmarkTicker = signal('XWD.TO');
+    readonly selectedBenchmarkEnvelopes = signal<EnvelopeSummary[]>([]);
+    private readonly refreshTrigger$ = new Subject<boolean>();
     private readonly rangeTrigger$ = new BehaviorSubject<OverviewPeriod>('1y');
+    private readonly benchmarkTicker$ = new BehaviorSubject<string>('XWD.TO');
+    private readonly benchmarkEnvelopes$ = new BehaviorSubject<number[]>([]);
 
     private readonly data = toSignal(
-        combineLatest([this.refreshTrigger$.pipe(startWith(undefined)), this.rangeTrigger$]).pipe(
+        combineLatest([
+            this.refreshTrigger$.pipe(startWith(false)),
+            this.rangeTrigger$,
+            this.benchmarkTicker$,
+            this.benchmarkEnvelopes$,
+        ]).pipe(
             tap(() => this.isChartLoading.set(true)),
-            switchMap(([, range]) =>
+            switchMap(([forceRefresh, range, ticker, envIds]) =>
                 forkJoin({
-                    dashboard: this.apiService.getDashboard(),
-                    overview: this.apiService.getEnvelopesOverview(range),
+                    dashboard: this.apiService.getDashboard(forceRefresh),
+                    overview: this.apiService.getEnvelopesOverview(range, ticker, envIds),
                 }),
             ),
             tap(() => this.isChartLoading.set(false)),
@@ -236,6 +263,13 @@ export class DashboardComponent {
     readonly chartDates = computed(() => this.data()?.overview.dates ?? []);
     readonly chartBenchmarkPct = computed(() => this.data()?.overview.benchmark_pct ?? []);
     readonly chartPortfolioPct = computed(() => this.data()?.overview.portfolio_pct ?? []);
+    readonly benchmarkLabel = computed(() => this.data()?.overview.benchmark_ticker ?? 'XWD.TO');
+    readonly portfolioLabel = computed(() => {
+        const envs = this.selectedBenchmarkEnvelopes();
+        if (envs.length === 0) return 'Portfolio';
+        if (envs.length === 1) return envs[0].name;
+        return envs.map((e) => e.name).join(', ');
+    });
     readonly isDarkMode = computed(() => this.utilsService.darkMode());
     /** True once the first API response has resolved — guards against flashing empty states on initial load. */
     readonly isDataLoaded = computed(() => this.data() !== undefined);
@@ -277,6 +311,7 @@ export class DashboardComponent {
     // ── Settings modal ────────────────────────────────────────────────────────
 
     readonly settingsModalVisible = signal(false);
+    readonly allAlertsModalVisible = signal(false);
 
     onSettingsSaved(settings: UserSettingsOut): void {
         if (settings.currency) this.currencySymbol.set(settings.currency);
@@ -351,6 +386,15 @@ export class DashboardComponent {
     readonly dividendMode = signal<'flat' | 'per-share'>('flat');
     readonly bulkPasteContent = new FormControl('', { nonNullable: true });
 
+    readonly projectionForm = new FormGroup({
+        deposit: new FormControl<number>(0, { nonNullable: true, validators: [Validators.min(0)] }),
+        annual_rate_pct: new FormControl<number>(7.0, {
+            nonNullable: true,
+            validators: [Validators.min(0), Validators.max(100)],
+        }),
+        deposit_frequency: new FormControl<DepositFrequency>('monthly', { nonNullable: true }),
+    });
+
     readonly transactionForm = new FormGroup({
         type: new FormControl<TransactionType>('BUY', { nonNullable: true, validators: [Validators.required] }),
         envelope_name: new FormControl<string | null>(null, [Validators.required]),
@@ -360,6 +404,22 @@ export class DashboardComponent {
         shares: new FormControl<number | null>(null),
         fees: new FormControl<number>(0, { nonNullable: true }),
         note: new FormControl<string | null>(null),
+    });
+
+    // ── Auto-deposit shortcut (BUY only) ─────────────────────────────────────
+
+    readonly autoDepositCheckboxControl = new FormControl<boolean>(false, { nonNullable: true });
+    readonly autoDepositAmountControl = new FormControl<number>(0, { nonNullable: true });
+    readonly autoDeposit = toSignal(this.autoDepositCheckboxControl.valueChanges, { initialValue: false });
+
+    private readonly formValues = toSignal(this.transactionForm.valueChanges, {
+        initialValue: this.transactionForm.getRawValue(),
+    });
+
+    readonly autoDepositComputed = computed(() => {
+        const { shares, price } = this.formValues();
+        if (!shares || !price) return 0;
+        return Math.round(shares * price * 100) / 100;
     });
 
     // ── Chart ─────────────────────────────────────────────────────────────────
@@ -391,6 +451,7 @@ export class DashboardComponent {
             shares.updateValueAndValidity();
             this.sellTickerNotice.set(null);
             this.dividendMode.set('flat');
+            if (type !== 'BUY') this.autoDepositCheckboxControl.reset(false);
         });
 
         // SELL auto-envelope: switch envelope to whichever holds the typed ticker
@@ -423,16 +484,24 @@ export class DashboardComponent {
 
         // Re-render the chart whenever the data signals change
         effect(() => {
+            const projMode = this.projectionMode();
+            const projData = this.projectionData();
             const series = this.chartSeries();
             const dates = this.chartDates();
             const txs = this.transactions();
             const benchmarkMode = this.benchmarkMode();
             const benchmarkPct = this.chartBenchmarkPct();
             const portfolioPct = this.chartPortfolioPct();
+            const benchmarkLabel = this.benchmarkLabel();
+            const portfolioLabel = this.portfolioLabel();
             const isDarkMode = this.isDarkMode();
             const canvasRef = this.chartCanvas();
 
-            if (series.length > 0 && dates.length > 0 && canvasRef?.nativeElement) {
+            if (!canvasRef?.nativeElement) return;
+
+            if (projMode && projData) {
+                requestAnimationFrame(() => this.renderProjectionChart(canvasRef.nativeElement, projData, isDarkMode));
+            } else if (!projMode && series.length > 0 && dates.length > 0) {
                 requestAnimationFrame(() =>
                     this.renderChart(
                         canvasRef.nativeElement,
@@ -442,6 +511,8 @@ export class DashboardComponent {
                         benchmarkMode,
                         benchmarkPct,
                         portfolioPct,
+                        benchmarkLabel,
+                        portfolioLabel,
                         isDarkMode,
                     ),
                 );
@@ -453,11 +524,28 @@ export class DashboardComponent {
             if (rows) this.watchlist.set(rows);
         });
 
+        effect(() => {
+            this.autoDepositAmountControl.setValue(this.autoDepositComputed(), { emitEvent: false });
+        });
+
+        this.projectionForm.valueChanges.pipe(debounceTime(400), takeUntilDestroyed()).subscribe(() => {
+            if (this.projectionMode()) this.runProjection();
+        });
+
         this.apiService
             .getAlerts()
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
                 next: (alerts) => this.userAlerts.set(alerts),
+            });
+
+        this.apiService
+            .getSettings()
+            .pipe(take(1))
+            .subscribe({
+                next: (settings) => {
+                    if (settings.dark_mode != null) this.utilsService.applyDarkMode(settings.dark_mode);
+                },
             });
     }
 
@@ -471,6 +559,8 @@ export class DashboardComponent {
         benchmarkMode: boolean,
         benchmarkPct: (number | null)[],
         portfolioPct: (number | null)[],
+        benchmarkLabel: string,
+        portfolioLabel: string,
         isDarkMode: boolean,
     ): void {
         if (this.chartInstance) {
@@ -620,7 +710,7 @@ export class DashboardComponent {
                   gradPort.addColorStop(1, portfolioLineColor + '05');
                   return [
                       {
-                          label: 'Portfolio',
+                          label: portfolioLabel,
                           data: portfolioPct,
                           borderColor: portfolioLineColor,
                           backgroundColor: gradPort,
@@ -634,7 +724,7 @@ export class DashboardComponent {
                           pointBorderWidth: 2,
                       },
                       {
-                          label: 'WPEA.PA',
+                          label: benchmarkLabel,
                           data: benchmarkPct,
                           borderColor: benchmarkLineColor,
                           backgroundColor: 'transparent',
@@ -764,7 +854,7 @@ export class DashboardComponent {
                     </div>
                     <span class="text-[13px] font-medium text-slate-900 dark:text-zinc-50 font-mono tracking-tight">${sign}${val.toFixed(2)}%</span>
                   </div>`;
-                                    if (dp.dataset.label === 'Portfolio') portVal = val;
+                                    if (dp.dataset.label === portfolioLabel) portVal = val;
                                     else benchVal = val;
                                 });
                                 if (portVal !== null && benchVal !== null) {
@@ -773,7 +863,7 @@ export class DashboardComponent {
                                     const deltaColor = delta >= 0 ? '#10b981' : '#f43f5e';
                                     html += `
                 <div class="mt-3 pt-3 border-t border-slate-100/80 dark:border-zinc-700/80 flex justify-between items-center">
-                  <span class="text-[13px] font-extrabold text-slate-900 dark:text-zinc-50">vs WPEA.PA</span>
+                  <span class="text-[13px] font-extrabold text-slate-900 dark:text-zinc-50">vs ${benchmarkLabel}</span>
                   <span class="text-sm font-extrabold font-mono tracking-tight" style="color:${deltaColor}">${sign}${delta.toFixed(2)}%</span>
                 </div>`;
                                 }
@@ -909,6 +999,183 @@ export class DashboardComponent {
         }
     }
 
+    private renderProjectionChart(canvas: HTMLCanvasElement, data: ProjectionResponse, isDarkMode: boolean): void {
+        this.chartInstance?.destroy();
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const gridColor = isDarkMode ? '#3f3f46' : '#f1f5f9';
+        const tickColor = isDarkMode ? '#a1a1aa' : '#64748b';
+        const crosshairColor = isDarkMode ? '#52525b' : '#cbd5e1';
+        const pointBg = isDarkMode ? '#27272a' : '#ffffff';
+        const currency = this.currencySymbol();
+
+        const investedColor = '#3b82f6';
+        const interestColor = '#10b981';
+
+        const gradInvested = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradInvested.addColorStop(0, investedColor + '60');
+        gradInvested.addColorStop(1, investedColor + '0D');
+
+        const gradInterest = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradInterest.addColorStop(0, interestColor + '60');
+        gradInterest.addColorStop(1, interestColor + '0D');
+
+        const [investedDs, interestDs] = data.chart_data.datasets;
+        const fmt = (v: number) =>
+            new Intl.NumberFormat(navigator.language, { notation: 'compact', maximumFractionDigits: 1 }).format(v);
+
+        const crosshairPlugin: Plugin = {
+            id: 'crosshair',
+            afterDraw: (chart) => {
+                if (!chart.tooltip?.getActiveElements()?.length) return;
+                const activePoint = chart.tooltip.getActiveElements()[0];
+                const c = chart.ctx;
+                const x = activePoint.element.x;
+                c.save();
+                c.beginPath();
+                c.moveTo(x, chart.scales['y'].top);
+                c.lineTo(x, chart.scales['y'].bottom);
+                c.lineWidth = 1;
+                c.strokeStyle = crosshairColor;
+                c.setLineDash([4, 4]);
+                c.stroke();
+                c.restore();
+            },
+        };
+
+        this.chartInstance = new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: data.chart_data.labels,
+                datasets: [
+                    {
+                        label: investedDs.label,
+                        data: investedDs.data,
+                        borderColor: investedColor,
+                        backgroundColor: gradInvested,
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: pointBg,
+                        pointBorderColor: investedColor,
+                        pointBorderWidth: 2,
+                    },
+                    {
+                        label: interestDs.label,
+                        data: interestDs.data,
+                        borderColor: interestColor,
+                        backgroundColor: gradInterest,
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: pointBg,
+                        pointBorderColor: interestColor,
+                        pointBorderWidth: 2,
+                    },
+                ],
+            },
+            plugins: [crosshairPlugin],
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                layout: { padding: { top: 30, right: 0, left: 0, bottom: 0 } },
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: {
+                        stacked: true,
+                        grid: { display: false },
+                        ticks: {
+                            maxTicksLimit: 7,
+                            color: tickColor,
+                            font: { family: 'Inter, ui-sans-serif, system-ui, sans-serif', size: 11, weight: 500 },
+                        },
+                        border: { display: false },
+                    },
+                    y: {
+                        stacked: true,
+                        grid: { color: gridColor, tickLength: 0 },
+                        border: { display: false, dash: [4, 4] },
+                        ticks: {
+                            callback: (value) => fmt(Number(value)),
+                            color: tickColor,
+                            font: { family: 'ui-monospace, SFMono-Regular, monospace', size: 11 },
+                        },
+                    },
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        enabled: false,
+                        position: 'nearest',
+                        external: (context) => {
+                            const { chart, tooltip } = context;
+
+                            let tooltipEl = chart.canvas.parentNode?.querySelector(
+                                'div.custom-chartjs-tooltip',
+                            ) as HTMLElement;
+                            if (!tooltipEl) {
+                                tooltipEl = document.createElement('div');
+                                tooltipEl.className =
+                                    'custom-chartjs-tooltip absolute z-[100] pointer-events-none transition-all duration-300 ease-out transform -translate-y-1/2';
+                                chart.canvas.parentNode?.appendChild(tooltipEl);
+                            }
+
+                            if (tooltip.opacity === 0) {
+                                tooltipEl.style.opacity = '0';
+                                tooltipEl.style.transform = 'translateY(-50%) scale(0.95)';
+                                return;
+                            }
+
+                            let total = 0;
+                            let html = `<div class="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border border-slate-200/60 dark:border-zinc-700/60 shadow-2xl shadow-slate-200/50 dark:shadow-zinc-900/50 rounded-2xl p-4 w-[280px]">`;
+                            html += `<p class="text-xs font-extrabold text-slate-400 dark:text-zinc-500 mb-3 uppercase tracking-widest">${tooltip.title[0]}</p>`;
+
+                            tooltip.dataPoints.forEach((dp) => {
+                                const val = dp.raw as number;
+                                const color = (dp.dataset as any).borderColor || '#000';
+                                total += val;
+                                html += `
+                  <div class="flex justify-between items-center gap-4 mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 shadow-sm" style="background-color: ${color}"></span>
+                      <span class="text-[13px] font-semibold text-slate-700 dark:text-zinc-300">${dp.dataset.label}</span>
+                    </div>
+                    <span class="text-[13px] font-medium text-slate-900 dark:text-zinc-50 font-mono tracking-tight">${fmt(val)} ${currency}</span>
+                  </div>`;
+                            });
+
+                            html += `
+                <div class="mt-3 pt-3 border-t border-slate-100/80 dark:border-zinc-700/80 flex justify-between items-center">
+                  <span class="text-[13px] font-extrabold text-slate-900 dark:text-zinc-50">Total</span>
+                  <span class="text-sm font-extrabold text-slate-900 dark:text-zinc-50 font-mono tracking-tight">${fmt(total)} ${currency}</span>
+                </div>`;
+
+                            html += `</div>`;
+                            tooltipEl.innerHTML = html;
+
+                            const tooltipWidth = 280;
+                            const canvasWidth = chart.canvas.clientWidth;
+                            const margin = 12;
+                            let left = tooltip.caretX - tooltipWidth / 2;
+                            if (left < margin) left = margin;
+                            if (left + tooltipWidth > canvasWidth - margin) left = canvasWidth - tooltipWidth - margin;
+
+                            tooltipEl.style.opacity = '1';
+                            tooltipEl.style.transform = 'translateY(-50%) scale(1)';
+                            tooltipEl.style.left = left + 'px';
+                            tooltipEl.style.top = (+tooltip.caretY - 24).toString() + 'px';
+                        },
+                    },
+                },
+            },
+        });
+    }
+
     // ── Sparkline helper ──────────────────────────────────────────────────────
 
     /**
@@ -966,7 +1233,7 @@ export class DashboardComponent {
                 next: () => {
                     this.isCreatingEnvelope.set(false);
                     this.closeEnvelopeDialog();
-                    this.refreshTrigger$.next();
+                    this.refreshTrigger$.next(false);
                 },
                 error: () => this.isCreatingEnvelope.set(false),
             });
@@ -987,7 +1254,7 @@ export class DashboardComponent {
                 next: () => {
                     this.isCreatingEnvelope.set(false);
                     this.closeEnvelopeDialog();
-                    this.refreshTrigger$.next();
+                    this.refreshTrigger$.next(false);
                 },
                 error: () => this.isCreatingEnvelope.set(false),
             });
@@ -1006,7 +1273,7 @@ export class DashboardComponent {
                 next: () => {
                     this.isCreatingEnvelope.set(false);
                     this.closeEnvelopeDialog();
-                    this.refreshTrigger$.next();
+                    this.refreshTrigger$.next(false);
                 },
                 error: () => this.isCreatingEnvelope.set(false),
             });
@@ -1029,6 +1296,8 @@ export class DashboardComponent {
         this.transactionMode.set('form');
         this.sellTickerNotice.set(null);
         this.dividendMode.set('flat');
+        this.autoDepositCheckboxControl.reset(false);
+        this.autoDepositAmountControl.reset(0);
 
         const availableEnvelopes = this.envelopes();
         if (availableEnvelopes.length > 0) {
@@ -1041,6 +1310,8 @@ export class DashboardComponent {
     closeTransactionDialog(): void {
         this.isTransactionDialogOpen.set(false);
         this.sellTickerNotice.set(null);
+        this.autoDepositCheckboxControl.reset(false);
+        this.autoDepositAmountControl.reset(0);
     }
 
     setTransactionMode(mode: 'form' | 'paste'): void {
@@ -1085,17 +1356,30 @@ export class DashboardComponent {
                 note: note?.trim() || null,
             };
 
-            this.apiService
-                .addTransaction(payload)
-                .pipe(takeUntilDestroyed(this.destroyRef))
-                .subscribe({
-                    next: () => {
-                        this.isCreatingTransaction.set(false);
-                        this.closeTransactionDialog();
-                        this.refreshTrigger$.next();
-                    },
-                    error: () => this.isCreatingTransaction.set(false),
-                });
+            const submit$ =
+                this.autoDeposit() && type === 'BUY'
+                    ? this.apiService
+                          .addTransaction({
+                              type: 'DEPOSIT',
+                              envelope_name: envelope_name!,
+                              date: isoDate,
+                              price: this.autoDepositAmountControl.value,
+                              ticker: null,
+                              shares: null,
+                              fees: 0,
+                              note: null,
+                          })
+                          .pipe(switchMap(() => this.apiService.addTransaction(payload)))
+                    : this.apiService.addTransaction(payload);
+
+            submit$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+                next: () => {
+                    this.isCreatingTransaction.set(false);
+                    this.closeTransactionDialog();
+                    this.refreshTrigger$.next(false);
+                },
+                error: () => this.isCreatingTransaction.set(false),
+            });
         } else {
             // ── Bulk paste mode ─────────────────────────────────────────────────
             const text = this.bulkPasteContent.value;
@@ -1192,7 +1476,7 @@ export class DashboardComponent {
                     next: () => {
                         this.isCreatingTransaction.set(false);
                         this.closeTransactionDialog();
-                        this.refreshTrigger$.next();
+                        this.refreshTrigger$.next(false);
                     },
                     error: () => {
                         this.isParsingError.set('API Error: some transactions failed to save.');
@@ -1224,7 +1508,7 @@ export class DashboardComponent {
             .deleteTransaction(id)
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
-                next: () => this.refreshTrigger$.next(),
+                next: () => this.refreshTrigger$.next(false),
                 error: (err) => console.error('Failed to delete transaction', err),
             });
     }
@@ -1301,9 +1585,51 @@ export class DashboardComponent {
         });
     }
 
+    forceRefreshDashboard(): void {
+        this.refreshTrigger$.next(true);
+    }
+
     toggleBenchmark(): void {
         this.hiddenSeries.set(new Set());
         this.benchmarkMode.update((v) => !v);
+    }
+
+    toggleProjection(): void {
+        if (!this.projectionMode()) {
+            if (this.benchmarkMode()) this.toggleBenchmark();
+        }
+        this.projectionMode.update((v) => !v);
+        if (this.projectionMode()) {
+            this.runProjection();
+        } else {
+            this.projectionData.set(null);
+        }
+    }
+
+    private runProjection(): void {
+        if (this.projectionForm.invalid) return;
+        const { deposit, annual_rate_pct, deposit_frequency } = this.projectionForm.getRawValue();
+        this.isProjectionLoading.set(true);
+        this.apiService
+            .postProjection({ deposit, annual_rate_pct, deposit_frequency })
+            .pipe(take(1), takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+                next: (data) => {
+                    this.projectionData.set(data);
+                    this.isProjectionLoading.set(false);
+                },
+                error: () => this.isProjectionLoading.set(false),
+            });
+    }
+
+    setBenchmarkTicker(value: string): void {
+        this.selectedBenchmarkTicker.set(value);
+        this.benchmarkTicker$.next(value);
+    }
+
+    setBenchmarkEnvelopes(envs: EnvelopeSummary[]): void {
+        this.selectedBenchmarkEnvelopes.set(envs);
+        this.benchmarkEnvelopes$.next(envs.map((e) => e.id));
     }
 
     setTimeRange(label: string): void {

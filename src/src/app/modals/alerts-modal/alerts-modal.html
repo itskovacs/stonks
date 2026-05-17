@@ -22,6 +22,21 @@
             </div>
         </div>
 
+        @if (_ticker.fifty_two_week_high || _ticker.fifty_two_week_low) {
+        <div
+            class="flex-none flex items-center gap-4 px-4 py-2 border-b border-primary-100 dark:border-primary-800 text-xs text-primary-500 dark:text-primary-400">
+            <span class="font-medium text-primary-400 dark:text-primary-500 uppercase tracking-wide">52W</span>
+            @if (_ticker.fifty_two_week_low) {
+            <span>Low <span class="font-semibold tabular-nums text-red-500">{{ _ticker.fifty_two_week_low |
+                    number:'1.2-4' }}</span></span>
+            }
+            @if (_ticker.fifty_two_week_high) {
+            <span>High <span class="font-semibold tabular-nums text-emerald-500">{{ _ticker.fifty_two_week_high |
+                    number:'1.2-4' }}</span></span>
+            }
+        </div>
+        }
+
         <div class="flex-1 min-h-0 p-4 max-h-[60vh] overflow-y-auto">
             @defer (when !isLoading()) {
             <!-- Existing alerts -->
@@ -42,13 +57,16 @@
                     <div class="mt-2 flex flex-col sm:flex-row sm:items-center gap-4">
                         <p-inputnumber formControlName="target_price" [minFractionDigits]="2" [maxFractionDigits]="2"
                             [min]="0.01" placeholder="Target price" [showButtons]="false" />
-                        <p-select-button [options]="directionOptions" formControlName="trigger_above"
-                            optionLabel="label" optionValue="value" />
-                        <div class="flex gap-1 ml-auto">
-                            <p-button icon="pi pi-check" size="small" severity="success" [loading]="isSaving()"
-                                (click)="saveEdit()" text />
-                            <p-button icon="pi pi-times" size="small" severity="secondary" (click)="cancelEdit()"
-                                text />
+
+                        <div class="flex-1 flex justify-between items-center gap-4">
+                            <p-select-button [options]="directionOptions" formControlName="trigger_above"
+                                optionLabel="label" optionValue="value" />
+                            <div class="flex gap-1 ml-auto">
+                                <p-button icon="pi pi-check" size="small" severity="success" [loading]="isSaving()"
+                                    (click)="saveEdit()" text />
+                                <p-button icon="pi pi-times" size="small" severity="secondary" (click)="cancelEdit()"
+                                    text />
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -110,13 +128,16 @@
                 <div class="mt-2 flex flex-col sm:flex-row sm:items-center gap-4">
                     <p-inputnumber formControlName="target_price" [minFractionDigits]="2" [maxFractionDigits]="2"
                         [min]="0.01" placeholder="Target price" [showButtons]="false" />
-                    <p-select-button [options]="directionOptions" formControlName="trigger_above" optionLabel="label"
-                        optionValue="value" />
-                    <div class="flex gap-1 ml-auto">
-                        <p-button icon="pi pi-check" size="small" severity="success" [loading]="isSaving()"
-                            [disabled]="createForm.invalid" (click)="createAlert()" text />
-                        <p-button icon="pi pi-times" size="small" severity="secondary"
-                            (click)="showCreateForm.set(false); createForm.reset({ trigger_above: true })" text />
+
+                    <div class="flex-1 flex justify-between items-center gap-4">
+                        <p-select-button [options]="directionOptions" formControlName="trigger_above"
+                            optionLabel="label" optionValue="value" />
+                        <div class="flex gap-1 ml-auto">
+                            <p-button icon="pi pi-check" size="small" severity="success" [loading]="isSaving()"
+                                [disabled]="createForm.invalid" (click)="createAlert()" text />
+                            <p-button icon="pi pi-times" size="small" severity="secondary"
+                                (click)="showCreateForm.set(false); createForm.reset({ trigger_above: true })" text />
+                        </div>
                     </div>
                 </div>
             </div>
