@@ -5,7 +5,9 @@ import {
     AlertOut,
     AlertRequest,
     AlertUpdateRequest,
+    DashboardLedgerResponse,
     DashboardResponse,
+    EarningsCalendarResponse,
     EnvelopeOverviewResponse,
     EnvelopeRequest,
     MutationResponse,
@@ -14,6 +16,8 @@ import {
     PriceChartResponse,
     ProjectionRequest,
     ProjectionResponse,
+    ScreenerRow,
+    ScreenerSentiment,
     StockReport,
     TickerRequest,
     TickerSearchResult,
@@ -65,7 +69,15 @@ export class ApiService {
     }
 
     // ---------------------------------------------------------------------------
-    // Dashboard — GET /profile/dashboard (single monolith call — do not split)
+    // Dashboard — fast ledger slice (DB+CPU only, ~20 ms)
+    // ---------------------------------------------------------------------------
+
+    getDashboardLedger(): Observable<DashboardLedgerResponse> {
+        return this.http.get<DashboardLedgerResponse>(`${this.apiBaseUrl}/profile/dashboard/ledger`);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Dashboard — full market data (live prices, watchlist, enriched totals)
     // ---------------------------------------------------------------------------
 
     getDashboard(forceRefresh = false): Observable<DashboardResponse> {
@@ -212,5 +224,26 @@ export class ApiService {
 
     postProjection(data: ProjectionRequest): Observable<ProjectionResponse> {
         return this.http.post<ProjectionResponse>(`${this.apiBaseUrl}/projection`, data);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Earnings Calendar — GET /earnings
+    // ---------------------------------------------------------------------------
+
+    getEarningsCalendar(): Observable<EarningsCalendarResponse> {
+        return this.http.get<EarningsCalendarResponse>(`${this.apiBaseUrl}/earnings`);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Screener — GET /api/profile/screener
+    //            GET /api/profile/screener/{ticker}/sentiment  (lazy)
+    // ---------------------------------------------------------------------------
+
+    getScreener(): Observable<ScreenerRow[]> {
+        return this.http.get<ScreenerRow[]>(`${this.apiBaseUrl}/profile/screener`);
+    }
+
+    getScreenerSentiment(ticker: string): Observable<ScreenerSentiment> {
+        return this.http.get<ScreenerSentiment>(`${this.apiBaseUrl}/profile/screener/${ticker}/sentiment`);
     }
 }

@@ -53,6 +53,7 @@ class User(SQLModel, table=True):
     currency: str | None
     apprise_url: str | None = Field(default=None, description="Comma-separated Apprise URLs")
     dark_mode: bool | None
+    earnings_notify: bool | None = Field(default=True)
 
     watchlist_items: list["WatchlistItem"] = Relationship(
         back_populates="owner", cascade_delete=True
@@ -80,6 +81,8 @@ class Alert(SQLModel, table=True):
     trigger_above: bool
     is_armed: bool = Field(default=True)
     last_triggered: date | None = Field(default=None)
+    notes: str | None = Field(default=None, max_length=500)
+    actionable: bool = Field(default=False)
 
     owner: User | None = Relationship(back_populates="alerts")
 

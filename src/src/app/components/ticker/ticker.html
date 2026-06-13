@@ -11,7 +11,7 @@
             </button>
             <div>
                 <div class="flex flex-col items-start">
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-2 max-w-52 sm:max-w-none overflow-x-auto sm:overflow-hidden">
                         <h1
                             class="text-3xl sm:text-4xl font-black tracking-tight text-primary-900 dark:text-primary-50">
                             {{ r.stock_bar.ticker }}
@@ -24,7 +24,9 @@
                             {{ isWatchlisted() ? '✓' : '+ Follow' }}
                         </button>
                         <button (click)="refresh()" [disabled]="isRefreshing()" title="Refresh data"
-                            class="text-xs text-primary-600 dark:text-primary-300 border border-primary-200 dark:border-primary-700 rounded-md px-2.5 py-1.5 bg-white dark:bg-transparent hover:bg-primary-900 hover:text-white hover:border-primary-900 dark:hover:bg-primary-700 dark:hover:text-primary-50 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                            class="text-xs text-primary-600 dark:text-primary-300 border border-primary-200
+                        dark:border-primary-700 rounded-md px-2.5 py-1.5 bg-white dark:bg-transparent hover:bg-primary-900 hover:text-white hover:border-primary-900
+                        dark:hover:bg-primary-700 dark:hover:text-primary-50 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
                             <i class="pi pi-refresh text-xs!" [class.animate-spin]="isRefreshing()"></i>
                         </button>
                         <button (click)="alertsModalVisible.set(true)" title="Price alerts"
@@ -33,15 +35,15 @@
                             <i class="pi pi-bell text-xs!"></i>
                         </button>
                     </div>
-                    <h2 class="text-xs text-primary-400 font-medium tracking-wide truncate">
+                    <h2 class="text-xs text-primary-400 font-medium tracking-wide truncate max-w-52 sm:max-w-none">
                         {{ r.stock_bar.name }}
                     </h2>
                 </div>
                 <div
                     class="flex items-center gap-1.5 mt-1 text-[7px] sm:text-[9px] text-primary-500 dark:text-primary-400 font-medium uppercase sm:tracking-wider min-w-0">
-                    <span class="truncate">{{ r.stock_bar.sector }}</span>
+                    <span class="truncate max-w-24 sm:max-w-none">{{ r.stock_bar.sector }}</span>
                     <span class="w-1 h-1 rounded-full bg-primary-300 dark:bg-primary-600"></span>
-                    <span class="truncate">{{ r.stock_bar.industry }}</span>
+                    <span class="truncate max-w-24 sm:max-w-none">{{ r.stock_bar.industry }}</span>
                 </div>
             </div>
         </div>

@@ -52,6 +52,8 @@ def create_alert(
         ticker=req.ticker,
         target_price=req.target_price,
         trigger_above=req.trigger_above,
+        notes=req.notes,
+        actionable=req.actionable,
     )
     session.add(alert)
     session.commit()
@@ -80,10 +82,15 @@ def update_alert(
         alert.target_price = req.target_price
     if req.trigger_above is not None:
         alert.trigger_above = req.trigger_above
+    if req.notes is not None:
+        alert.notes = req.notes.strip() or None
+    if req.actionable is not None:
+        alert.actionable = req.actionable
 
-    # Changing the trigger condition resets the alert so it can fire on the new settings.
-    alert.is_armed = True
-    alert.last_triggered = None
+    # Only reset armed state when the trigger condition itself changes.
+    if req.target_price is not None or req.trigger_above is not None:
+        alert.is_armed = True
+        alert.last_triggered = None
 
     session.add(alert)
     session.commit()

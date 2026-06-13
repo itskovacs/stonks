@@ -17,10 +17,10 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from config import get_settings
 from db.core import init_and_migrate_db
-from routers import alerts, auth, news, profile, projection, stock
-from services.scheduler import check_prices_and_notify
+from routers import alerts, auth, earnings, news, profile, projection, screener, stock
+from services.scheduler import check_prices_and_notify, notify_earnings_summary, warm_dashboard_cache
 
-VERSION = "1.1.0"
+VERSION = "1.3.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -41,8 +41,10 @@ async def lifespan(app: FastAPI):
     log.info("STONKS ready")
     scheduler = AsyncIOScheduler()
     scheduler.add_job(check_prices_and_notify, 'cron', day_of_week='mon-fri', hour='7-22', minute='*/15')
+    scheduler.add_job(notify_earnings_summary, 'cron', day_of_week='mon-fri', hour=8, minute=0)
+    scheduler.add_job(warm_dashboard_cache,    'cron', day_of_week='mon-fri', hour='7-22', minute='*/45')
     scheduler.start()
-    log.info("Scheduler (alerts) ready")
+    log.info("Scheduler (alerts + earnings notifier) ready")
     yield
     scheduler.shutdown()
     log.info("Shutting down")
@@ -64,6 +66,8 @@ app.include_router(news.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
 app.include_router(projection.router, prefix="/api")
+app.include_router(earnings.router, prefix="/api")
+app.include_router(screener.router, prefix="/api")
 
 
 @app.get("/api/")

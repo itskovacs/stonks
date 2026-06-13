@@ -124,7 +124,19 @@ def _ttl_history(period: str, end_date: str | None) -> int:
 
 
 def _ttl(method: str) -> int:
-    return _TTL.get(method, 4)
+    base = _TTL.get(method, 4)
+    if method != "info":
+        return base
+    now = datetime.now(UTC)
+    weekday = now.weekday()  # 0=Mon … 6=Sun
+    hour = now.hour
+    if weekday >= 5:                 # Sat/Sun — markets closed, data is static
+        return 72
+    if weekday == 4 and hour >= 20:  # Fri evening — bridge through the weekend
+        return 72
+    if hour >= 21 or hour < 13:     # weekday after-hours / pre-market
+        return 4
+    return base                      # market hours → 1 h
 
 
 # ── Serialisation ─────────────────────────────────────────────────────────────

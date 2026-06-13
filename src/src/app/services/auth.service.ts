@@ -166,7 +166,7 @@ export class AuthService {
             const payloadB64 = token.split('.')[1];
             if (!payloadB64) return null;
 
-            // Normalise base64url → base64, pad to a multiple of 4
+            // Normalize base64url → base64, pad to a multiple of 4
             const b64 = payloadB64.replace(/-/g, '+').replace(/_/g, '/');
             const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
 

@@ -2,7 +2,8 @@
     class="max-w-7xl xl:max-w-360 2xl:max-w-400 mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 bg-primary-50 dark:bg-primary-900 text-primary-900 dark:text-primary-50 font-sans antialiased min-h-screen selection:bg-blue-100 dark:selection:bg-blue-800">
 
     <section class="flex justify-end items-center mt-0 mb-2 gap-1">
-        <p-button text icon="pi pi-refresh" (click)="forceRefreshDashboard()" [loading]="isChartLoading()" />
+        <p-button text icon="pi pi-refresh" (click)="forceRefreshDashboard()" [loading]="isAnyLoading()" />
+        <p-button text icon="pi pi-table" routerLink="/screener" />
         <p-button text icon="pi pi-bell" (click)="allAlertsModalVisible.set(true)"
             [severity]="userAlerts().length > 0 ? 'warn' : 'secondary'" />
         <p-button text icon="pi pi-cog" (click)="settingsModalVisible.set(true)" />
@@ -98,9 +99,9 @@
     <!-- ── Envelopes ──────────────────────────────────────────────────────── -->
     <section class="flex flex-wrap sm:grid md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-2">
         @for (env of envelopes(); track env.id) {
-        <div
+        <div (click)="openEnvelopeStats(env)"
             class="group relative bg-white dark:bg-primary-800 border border-primary-200 dark:border-primary-700 p-3 rounded-lg flex flex-1
-            justify-between items-center shadow-sm hover:border-primary-300 dark:hover:border-primary-500 transition-colors last-of-type:w-auto">
+            justify-between items-center shadow-sm hover:border-primary-300 dark:hover:border-primary-500 transition-colors last-of-type:w-auto cursor-pointer">
 
             <div class="flex items-center gap-2">
                 <div class="h-2 w-2 rounded-full shrink-0" [style.background]="env.color"></div>
@@ -110,17 +111,23 @@
                             class="shrink-0 text-xs sm:text-sm font-medium text-primary-900 dark:text-primary-50 leading-none tracking-wide truncate">
                             {{ env.name }}</p>
 
-                        @let env_pnl_pct = env.capital_in > 0 ? ((env.total_value - env.capital_in) * 100) /
-                        env.capital_in : 0;
+                        @let envMetrics = envelopeMetrics()[env.name];
+                        @let roic_pct = (envMetrics && envMetrics.cost_basis > 0) ? (envMetrics.pnl /
+                        envMetrics.cost_basis) * 100 : null;
+                        @if (roic_pct != null) {
                         <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-md tabular-nums"
-                            [class]="env_pnl_pct >= 0 ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-red-50 text-red-500 dark:bg-red-900/20 dark:text-red-400'">
-                            {{ env_pnl_pct >= 0 ? '+' : '' }}{{ env_pnl_pct | number:'1.2-2' }}%
+                            [class]="roic_pct >= 0 ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-red-50 text-red-500 dark:bg-red-900/20 dark:text-red-400'">
+                            {{ roic_pct >= 0 ? '+' : '' }}{{ roic_pct | number:'1.2-2' }}%
                         </span>
+                        } @else if (env.capital_in < 0) { <span
+                            class="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400">
+                            Recouped
+                            </span>
+                            }
                     </div>
                     <p class="text-[9px] text-primary-500 dark:text-primary-400 font-medium tabular-nums tracking-wide">
                         <span class="text-primary-300 dark:text-primary-600">Unalloc.</span> {{ env.cash_available |
-                        number:'1.0-0' }} {{
-                        currencySymbol() }}
+                        compactNumber:1 }} {{ currencySymbol() }}
                     </p>
                 </div>
             </div>
@@ -157,6 +164,28 @@
         <div class="px-5 py-4 flex items-center justify-between border-b border-primary-100 dark:border-primary-700">
             <h2 class="text-sm font-bold text-primary-900 dark:text-primary-50">Tickers</h2>
             <div class="flex items-center gap-2 justify-end">
+                <button (click)="toggleWatchlistSort('name')"
+                    class="text-[9px] font-semibold uppercase tracking-wider border rounded-md px-3 py-1.5 transition-all cursor-pointer"
+                    [class]="watchlistSortField() === 'name'
+                        ? 'bg-primary-900 text-white border-primary-900 dark:bg-primary-50 dark:text-primary-900 dark:border-primary-50'
+                        : 'text-primary-600 dark:text-primary-300 border-primary-200 dark:border-primary-600 bg-white dark:bg-transparent hover:bg-primary-900 hover:text-white hover:border-primary-900 dark:hover:bg-primary-700 dark:hover:text-primary-50'">
+                    Name
+                    @if (watchlistSortField() === 'name') {
+                    <i
+                        [class]="watchlistSortDir() === 'asc' ? 'pi pi-arrow-up text-[8px]!' : 'pi pi-arrow-down text-[8px]!'"></i>
+                    }
+                </button>
+                <button (click)="toggleWatchlistSort('variation')"
+                    class="text-[9px] font-semibold uppercase tracking-wider border rounded-md px-3 py-1.5 transition-all cursor-pointer"
+                    [class]="watchlistSortField() === 'variation'
+                        ? 'bg-primary-900 text-white border-primary-900 dark:bg-primary-50 dark:text-primary-900 dark:border-primary-50'
+                        : 'text-primary-600 dark:text-primary-300 border-primary-200 dark:border-primary-600 bg-white dark:bg-transparent hover:bg-primary-900 hover:text-white hover:border-primary-900 dark:hover:bg-primary-700 dark:hover:text-primary-50'">
+                    %
+                    @if (watchlistSortField() === 'variation') {
+                    <i
+                        [class]="watchlistSortDir() === 'asc' ? 'pi pi-arrow-up text-[8px]!' : 'pi pi-arrow-down text-[8px]!'"></i>
+                    }
+                </button>
                 <button (click)="openTickerBrowser()"
                     class="text-[9px] font-semibold text-primary-600 dark:text-primary-300 uppercase tracking-wider border border-primary-200 dark:border-primary-600 rounded-md px-3 py-1.5 bg-white dark:bg-transparent hover:bg-primary-900 hover:text-white hover:border-primary-900 dark:hover:bg-primary-700 dark:hover:text-primary-50 dark:hover:border-primary-600 transition-all cursor-pointer">
                     <i class="pi pi-search text-[9px]!"></i> Browse
@@ -166,7 +195,7 @@
 
         <div class="hidden sm:grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 p-4 gap-3">
             @defer (when isDataLoaded()) {
-            @for (item of watchlist(); track item.ticker) {
+            @for (item of sortedWatchlist(); track item.ticker) {
             <div [routerLink]="'ticker/' + item.ticker" class="group relative cursor-pointer outline-none bg-white dark:bg-primary-900
             border border-primary-200 dark:border-primary-700 rounded-md hover:shadow-sm hover:border-primary-300
             dark:hover:border-primary-500 hover:-translate-y-px transition-all duration-180">
@@ -264,7 +293,7 @@
 
         <div class="grid sm:hidden">
             @defer (when isDataLoaded()) {
-            @for (item of watchlist(); track item.ticker) {
+            @for (item of sortedWatchlist(); track item.ticker) {
             <div [routerLink]="'ticker/' + item.ticker"
                 class="group/card relative outline-none flex bg-white dark:bg-primary-900">
                 <div class="flex-1 flex items-center justify-between p-3 pl-0">
@@ -457,14 +486,24 @@
                         <tr
                             class="not-last:border-b not-last:border-primary-50 dark:not-last:border-primary-700 hover:bg-primary-50/70 dark:hover:bg-primary-700/50 transition-colors duration-150 group">
 
-                            <td class="py-3 px-5">
-                                <p [routerLink]="'ticker/' + pos.ticker"
-                                    class="cursor-pointer text-sm font-bold text-primary-900 dark:text-primary-50 group-hover:text-blue-600 transition-colors leading-none">
-                                    {{ pos.ticker }}
-                                </p>
-                                @if (pos.name) {
-                                <p class="text-[9px] text-primary-400 mt-0.5 truncate max-w-[100px]">{{ pos.name }}</p>
-                                }
+                            <td class="group py-3 px-5">
+                                <div class="relative flex gap-2 items-center">
+                                    <div>
+                                        <p [routerLink]="'ticker/' + pos.ticker"
+                                            class="cursor-pointer text-sm font-bold text-primary-900 dark:text-primary-50 group-hover:text-blue-600 transition-colors leading-none">
+                                            {{ pos.ticker }}
+                                        </p>
+                                        @if (pos.name) {
+                                        <p class="text-[9px] text-primary-400 mt-0.5 truncate max-w-[100px]">{{ pos.name
+                                            }}
+                                        </p>
+                                        }
+                                    </div>
+                                    <p-button text [severity]="hasAlertsFor(pos.ticker) ? 'warn' : 'secondary'"
+                                        icon="pi pi-bell" size="small"
+                                        class="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100"
+                                        (click)="$event.stopPropagation(); openAlertsModal(pos, $event)" />
+                                </div>
                             </td>
 
                             <td class="py-3 px-4 text-right">
@@ -635,7 +674,6 @@
                         [class]="tx.class">
                         {{ tx.displayValue }}
                     </div>
-
                     <div class="flex-1 flex items-center justify-between gap-2">
                         <div class="flex flex-col min-w-0 gap-px">
                             <span class="text-sm font-bold text-primary-900 dark:text-primary-50 leading-none">
@@ -681,7 +719,7 @@
                                     class="shink-0 text-xs font-bold tabular-nums font-mono opacity-100 group-hover:opacity-0"
                                     [class]="trade.type === 'BUY' || trade.type === 'WITHDRAW' ? 'text-primary-700 dark:text-primary-300' : 'text-emerald-600'">
                                     {{ trade.type === 'BUY' || trade.type === 'WITHDRAW' ? '-' : '+' }}{{ trade.total |
-                                    number:'1.0-0' }} {{ currencySymbol() }}
+                                    compactNumber:1 }} {{ currencySymbol() }}
                                 </span>
                             </div>
                         </div>
@@ -759,30 +797,32 @@
         } @else {
         <!-- Projection inputs — shown instead of legend row when projection mode is active -->
         @if (projectionMode()) {
-        <div class="mt-2 sm:mt-4 flex flex-col gap-2 items-center">
-            @if (isProjectionLoading()) {
-            <i class="pi pi-spinner pi-spin text-primary-400 self-center mb-1"></i>
-            } @else if (projectionData()?.inputs; as inp) {
-            <span class="text-xs text-primary-400 text-center">
-                Starting from {{ inp.initial_balance | number:'1.0-0' }} {{ currencySymbol() }}
-            </span>
-            }
-            <div [formGroup]="projectionForm"
-                class="pb-3 flex flex-wrap justify-center items-center gap-4 border-b border-primary-100 dark:border-primary-700">
-                <div class="flex flex-col gap-1">
-                    <label class="text-[9px] font-bold text-primary-400 uppercase tracking-wider">Deposit</label>
-                    <p-inputnumber formControlName="deposit" [min]="0" [maxFractionDigits]="0" size="small" />
+        <div [formGroup]="projectionForm"
+            class="mt-2 sm:mt-4 pb-3 flex flex-wrap justify-center items-center gap-4 border-b border-primary-100 dark:border-primary-700">
+            <div class="flex flex-col gap-1">
+                <label class="text-[9px] font-bold text-primary-400 uppercase tracking-wider">Starting Value</label>
+                <div class="relative">
+                    <p-inputnumber formControlName="initial_balance" [min]="0" [maxFractionDigits]="0" size="small"
+                        [disabled]="isProjectionLoading()" />
+                    <div class="absolute top-1/2 -translate-y-1/2 right-1"><p-button (click)="resetProjectionBalance()"
+                            [disabled]="isProjectionLoading() || projectionForm.get('initial_balance')?.value === liveProjectionBalance()"
+                            icon="pi pi-replay" size="small" text />
+                    </div>
                 </div>
-                <div class="flex flex-col gap-1">
-                    <label class="text-[9px] font-bold text-primary-400 uppercase tracking-wider">Frequency</label>
-                    <p-select [options]="frequencyOptions" formControlName="deposit_frequency" optionLabel="label"
-                        optionValue="value" size="small" />
-                </div>
-                <div class="flex flex-col gap-1">
-                    <label class="text-[9px] font-bold text-primary-400 uppercase tracking-wider">Annual Rate</label>
-                    <p-inputnumber formControlName="annual_rate_pct" [min]="0" [max]="100" [maxFractionDigits]="1"
-                        size="small" suffix="%" />
-                </div>
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="text-[9px] font-bold text-primary-400 uppercase tracking-wider">Deposit</label>
+                <p-inputnumber formControlName="deposit" [min]="0" [maxFractionDigits]="0" size="small" />
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="text-[9px] font-bold text-primary-400 uppercase tracking-wider">Frequency</label>
+                <p-select [options]="frequencyOptions" formControlName="deposit_frequency" optionLabel="label"
+                    optionValue="value" size="small" />
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="text-[9px] font-bold text-primary-400 uppercase tracking-wider">Annual Rate</label>
+                <p-inputnumber formControlName="annual_rate_pct" [min]="0" [max]="100" [maxFractionDigits]="1"
+                    size="small" suffix="%" />
             </div>
         </div>
         }
@@ -847,6 +887,154 @@
             }
         </div>
         }
+        }
+    </section>
+
+    <!-- ── Earnings Calendar ────────────────────────────────────────────────── -->
+    <section
+        class="bg-white dark:bg-primary-800 border border-primary-200 dark:border-primary-700 rounded-xl overflow-hidden">
+        <div class="px-5 py-4 flex items-center justify-between border-b border-primary-100 dark:border-primary-700">
+            <div class="flex items-center gap-3">
+                <h2 class="text-sm font-bold text-primary-900 dark:text-primary-50">Earnings Calendar</h2>
+                <span
+                    class="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary-100 dark:bg-primary-700 text-primary-400 dark:text-primary-400">
+                    ±2 days
+                </span>
+            </div>
+            @if (!earningsLoaded()) {
+            <button (click)="fetchEarnings()"
+                class="text-[9px] font-semibold text-primary-600 dark:text-primary-300 uppercase tracking-wider border border-primary-200 dark:border-primary-600 rounded-md px-3 py-1.5 bg-white dark:bg-transparent hover:bg-primary-900 hover:text-white hover:border-primary-900 dark:hover:bg-primary-700 dark:hover:text-primary-50 dark:hover:border-primary-600 transition-all cursor-pointer">
+                <i class="pi pi-download text-[9px]!"></i> Fetch
+            </button>
+            } @else if (!isEarningsLoading()) {
+            <div class="flex items-center gap-1 flex-wrap justify-end">
+                <button (click)="earningsDateFilter.set(null)"
+                    class="text-[9px] font-bold px-2 py-1 rounded-md transition-colors cursor-pointer"
+                    [class]="earningsDateFilter() === null
+                        ? 'bg-primary-900 text-white dark:bg-primary-50 dark:text-primary-900'
+                        : 'text-primary-500 hover:text-primary-900 dark:hover:text-primary-50 hover:bg-primary-100 dark:hover:bg-primary-700'">
+                    All
+                </button>
+                @for (d of earningsDates(); track d) {
+                <button (click)="earningsDateFilter.set(d)"
+                    class="text-[9px] font-bold px-2 py-1 rounded-md transition-colors cursor-pointer tabular-nums"
+                    [class]="earningsDateFilter() === d
+                        ? 'bg-blue-600 text-white'
+                        : 'text-primary-500 hover:text-primary-900 dark:hover:text-primary-50 hover:bg-primary-100 dark:hover:bg-primary-700'">
+                    {{ d === today ? 'Today' : (d | date:'MMM d') }}
+                </button>
+                }
+            </div>
+            }
+        </div>
+
+        <!-- Not yet fetched -->
+        @if (!earningsLoaded()) {
+        <div class="px-5 py-10 flex flex-col items-center gap-2 text-center">
+            <i class="pi pi-calendar text-2xl text-primary-300 dark:text-primary-600"></i>
+            <p class="text-xs text-primary-400">Earnings data is loaded on demand.</p>
+        </div>
+        }
+
+        <!-- Loading skeleton -->
+        @else if (isEarningsLoading()) {
+        <div class="divide-y divide-primary-50 dark:divide-primary-700/60">
+            @for (i of [1,2,3,4,5]; track i) {
+            <div class="flex items-center gap-3 px-5 py-3">
+                <p-skeleton width="4rem" height="1.2rem" styleClass="rounded-md" />
+                <div class="flex-1 flex flex-col gap-1.5">
+                    <p-skeleton width="3rem" height="0.9rem" />
+                    <p-skeleton width="7rem" height="0.75rem" />
+                </div>
+                <p-skeleton width="5rem" height="0.8rem" styleClass="hidden sm:block" />
+                <p-skeleton width="5rem" height="1.75rem" styleClass="rounded" />
+                <p-skeleton width="3rem" height="0.9rem" />
+            </div>
+            }
+        </div>
+        }
+
+        <!-- Empty state -->
+        @else if (!earningsEntries().length) {
+        <div class="px-5 py-10 flex flex-col items-center gap-2 text-center">
+            <i class="pi pi-calendar text-2xl text-primary-300 dark:text-primary-600"></i>
+            <p class="text-xs text-primary-400">No earnings data available for this period.</p>
+        </div>
+        }
+
+        <!-- Data rows -->
+        @else {
+        <div class="overflow-y-auto max-h-[360px]">
+            <!-- Column headers -->
+            <div
+                class="hidden sm:grid grid-cols-[6rem_1fr_7rem_5rem_3.5rem] gap-3 px-5 py-2.5 border-b border-primary-50 dark:border-primary-700/60 sticky top-0 bg-white dark:bg-primary-800 z-10">
+                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-widest">Date</p>
+                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-widest">Ticker</p>
+                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-widest">Sector</p>
+                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-widest">5D</p>
+                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-widest text-right">Chg</p>
+            </div>
+
+            @for (entry of earningsEntries(); track entry.ticker) {
+            @let chg = earningsHistoryChange(entry.history);
+            @let upcoming = isEarningsUpcoming(entry.earnings_date);
+            <div
+                class="grid grid-cols-[auto_1fr] sm:grid-cols-[6rem_1fr_7rem_5rem_3.5rem] items-center gap-3 px-5 py-3 border-b border-primary-50 dark:border-primary-700/60 last:border-0 hover:bg-primary-50/40 dark:hover:bg-primary-900/40 transition-colors">
+
+                <!-- Date badge -->
+                <div class="shrink-0">
+                    <span class="text-[9px] font-bold px-1.5 py-1 rounded-md tabular-nums" [class]="upcoming
+                            ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
+                            : 'text-primary-400 dark:text-primary-500'">
+                        {{ entry.earnings_date }}
+                    </span>
+                </div>
+
+                <!-- Ticker + company -->
+                <div class="min-w-0 flex flex-col gap-0.5">
+                    <a [routerLink]="'/ticker/' + entry.ticker"
+                        class="text-[13px] font-black text-primary-900 dark:text-primary-50 hover:text-blue-600 dark:hover:text-blue-400 transition-colors leading-none">
+                        {{ entry.ticker }}
+                    </a>
+                    <p class="text-[10px] text-primary-400 truncate leading-none mt-0.5">
+                        {{ entry.company_name || '—' }}
+                    </p>
+                </div>
+
+                <!-- Sector -->
+                <p class="hidden sm:block text-[10px] text-primary-400 dark:text-primary-500 truncate">
+                    {{ entry.sector || '—' }}
+                </p>
+
+                <!-- 5-day sparkline -->
+                <div class="hidden sm:block h-7 w-20 shrink-0">
+                    @if (entry.history.length >= 2) {
+                    <svg class="w-full h-full" viewBox="0 0 80 28" preserveAspectRatio="none" aria-hidden="true">
+                        <defs>
+                            <linearGradient [attr.id]="'eg-' + entry.ticker" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" [attr.stop-color]="chg >= 0 ? '#10b981' : '#ef4444'"
+                                    stop-opacity="0.15" />
+                                <stop offset="100%" [attr.stop-color]="chg >= 0 ? '#10b981' : '#ef4444'"
+                                    stop-opacity="0" />
+                            </linearGradient>
+                        </defs>
+                        <path [attr.d]="sparklinePath(entry.history, true, 80, 28)"
+                            [attr.fill]="'url(#eg-' + entry.ticker + ')'" />
+                        <path [attr.d]="sparklinePath(entry.history, false, 80, 28)"
+                            [attr.stroke]="chg >= 0 ? '#10b981' : '#ef4444'" stroke-width="1.5" fill="none"
+                            stroke-linecap="round" />
+                    </svg>
+                    }
+                </div>
+
+                <!-- 5d change % -->
+                <p class="hidden sm:block text-[11px] font-bold tabular-nums font-mono text-right leading-none"
+                    [class]="chg >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'">
+                    {{ chg >= 0 ? '+' : '' }}{{ chg | number:'1.1-1' }}%
+                </p>
+            </div>
+            }
+        </div>
         }
     </section>
 </div>
@@ -1056,7 +1244,7 @@
                 </span>
                 }
             </label>
-        </div>x
+        </div>
         @if (autoDeposit()) {
         <p-floatlabel variant="in">
             <p-inputNumber inputId="auto-deposit-amount" [formControl]="autoDepositAmountControl" mode="decimal"
@@ -1268,3 +1456,7 @@
 <app-alerts-modal [(visible)]="alertsModalVisible" [ticker]="alertsModalTicker()!" (changed)="onAlertChanged()" />
 <app-all-alerts-modal [(visible)]="allAlertsModalVisible" (changed)="onAlertChanged()" />
 <app-settings-modal [(visible)]="settingsModalVisible" (saved)="onSettingsSaved($event)" />
+@if (envelopeStatsTarget()) {
+<app-envelope-stats-modal [(visible)]="envelopeStatsVisible" [envelope]="envelopeStatsTarget()!"
+    [positions]="positions()" [transactions]="transactions()" [currency]="currencySymbol()" />
+}

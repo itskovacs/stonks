@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 h
     REGISTER_ENABLE: bool = True
+    DEFAULT_CURRENCY: str = "€"
 
 
 @lru_cache

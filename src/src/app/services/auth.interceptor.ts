@@ -77,7 +77,6 @@ export const authInterceptor = (req: HttpRequest<unknown>, next: HttpHandlerFn):
             const message = serverDetail ?? err.message ?? config?.detail ?? 'Unknown error — check the console';
             const title = config?.title ?? 'Request Error';
 
-            console.error(`[HTTP ${err.status} – ${title}]`, err);
             utilsService.toast('error', title, message);
             return throwError(() => err);
         }),

@@ -31,7 +31,13 @@ export class AllAlertsModalComponent {
             if (bucket) bucket.push(a);
             else map.set(a.ticker, [a]);
         }
-        return [...map.entries()].map(([ticker, items]) => ({ ticker, items }));
+        return [...map.entries()].map(([ticker, items]) => ({
+            ticker,
+            items: items.sort((a, b) => {
+                if (a.trigger_above !== b.trigger_above) return a.trigger_above ? -1 : 1;
+                return b.target_price - a.target_price;
+            }),
+        }));
     });
 
     readonly totalCount = computed(() => this.alerts().length);
@@ -44,6 +50,8 @@ export class AllAlertsModalComponent {
     readonly editForm = new FormGroup({
         target_price: new FormControl<number | null>(null, [Validators.required, Validators.min(0.01)]),
         trigger_above: new FormControl<boolean>(true, { nonNullable: true }),
+        notes: new FormControl<string>('', { nonNullable: true }),
+        actionable: new FormControl<boolean>(false, { nonNullable: true }),
     });
 
     constructor() {
@@ -65,21 +73,26 @@ export class AllAlertsModalComponent {
 
     startEdit(alert: AlertOut): void {
         this.editingId.set(alert.id);
-        this.editForm.setValue({ target_price: alert.target_price, trigger_above: alert.trigger_above });
+        this.editForm.setValue({
+            target_price: alert.target_price,
+            trigger_above: alert.trigger_above,
+            notes: alert.notes ?? '',
+            actionable: alert.actionable,
+        });
     }
 
     cancelEdit(): void {
         this.editingId.set(null);
-        this.editForm.reset({ trigger_above: true });
+        this.editForm.reset({ trigger_above: true, notes: '', actionable: false });
     }
 
     saveEdit(): void {
         if (this.editForm.invalid) return;
         const id = this.editingId();
         if (id == null) return;
-        const { target_price, trigger_above } = this.editForm.getRawValue();
+        const { target_price, trigger_above, notes, actionable } = this.editForm.getRawValue();
         this.isSaving.set(true);
-        this.api.updateAlert(id, { target_price: target_price!, trigger_above }).subscribe({
+        this.api.updateAlert(id, { target_price: target_price!, trigger_above, notes, actionable }).subscribe({
             next: (updated) => {
                 this.alerts.update((list) => list.map((a) => (a.id === id ? updated : a)));
                 this.editingId.set(null);
@@ -101,7 +114,7 @@ export class AllAlertsModalComponent {
 
     toggle(): void {
         this.editingId.set(null);
-        this.editForm.reset({ trigger_above: true });
+        this.editForm.reset({ trigger_above: true, notes: '', actionable: false });
         this.visible.set(false);
     }
 }

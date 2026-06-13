@@ -15,10 +15,11 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import {
     BehaviorSubject,
+    catchError,
     combineLatest,
     concatMap,
     debounceTime,
-    forkJoin,
+    EMPTY,
     from,
     startWith,
     Subject,
@@ -48,15 +49,19 @@ import {
     ClosePricePoint,
     DashboardTotals,
     DepositFrequency,
+    EarningsCalendarResponse,
     EnvelopeSeriesLine,
     EnvelopeSummary,
     EnvelopeStats,
     OverviewPeriod,
+    PricePoint,
+    ProjectionRequest,
     ProjectionResponse,
     TickerSearchResult,
     TransactionOut,
     TransactionType,
     UserSettingsOut,
+    AlertableTicker,
     WatchlistRow,
     DepositPeriod,
 } from '../../int';
@@ -64,6 +69,7 @@ import { CompactNumberPipe } from '../../shared/amount.normalize';
 import { AlertsModalComponent } from '../../modals/alerts-modal/alerts-modal';
 import { AllAlertsModalComponent } from '../../modals/all-alerts-modal/all-alerts-modal';
 import { SettingsModalComponent } from '../../modals/settings-modal/settings-modal';
+import { EnvelopeStatsModalComponent } from '../../modals/envelope-stats-modal/envelope-stats-modal';
 import { DialogService } from 'primeng/dynamicdialog';
 import { YesNoModalComponent } from '../../modals/yes-no-modal/yes-no-modal.component';
 
@@ -95,6 +101,7 @@ type TxDisplayConfig = { color: string; letter: string; displayValue: string; cl
         AlertsModalComponent,
         AllAlertsModalComponent,
         SettingsModalComponent,
+        EnvelopeStatsModalComponent,
         CheckboxModule,
     ],
     templateUrl: './dashboard.html',
@@ -176,51 +183,93 @@ export class DashboardComponent {
 
     readonly isRevealed = signal(false);
     readonly isChartLoading = signal(false);
+    readonly isLedgerLoading = signal(true);
+    readonly isMarketLoading = signal(true);
     readonly benchmarkMode = signal(false);
     readonly projectionMode = signal(false);
     readonly projectionData = signal<ProjectionResponse | null>(null);
     readonly isProjectionLoading = signal(false);
+    readonly liveProjectionBalance = signal<number | null>(null);
     readonly selectedBenchmarkTicker = signal('XWD.TO');
     readonly selectedBenchmarkEnvelopes = signal<EnvelopeSummary[]>([]);
     private readonly refreshTrigger$ = new Subject<boolean>();
     private readonly rangeTrigger$ = new BehaviorSubject<OverviewPeriod>('1y');
+    private readonly projectionTrigger$ = new Subject<ProjectionRequest>();
+    private lastProjectionBalance: number | null = null;
     private readonly benchmarkTicker$ = new BehaviorSubject<string>('XWD.TO');
     private readonly benchmarkEnvelopes$ = new BehaviorSubject<number[]>([]);
 
-    private readonly data = toSignal(
+    // ── Three independent data streams ────────────────────────────────────────
+    // ledgerData  — DB+CPU only, resolves in ~20 ms, no yfinance calls
+    // marketData  — full dashboard with live prices, resolves in 1–3 s
+    // overviewData — portfolio chart history, resolves in 2–10 s
+    //
+    // The frontend renders each layer as soon as it arrives instead of waiting
+    // for the slowest of the three (previously a single forkJoin gate).
+
+    private readonly ledgerData = toSignal(
+        this.refreshTrigger$.pipe(
+            startWith(false as boolean),
+            tap(() => this.isLedgerLoading.set(true)),
+            switchMap(() => this.apiService.getDashboardLedger()),
+            tap(() => this.isLedgerLoading.set(false)),
+        ),
+    );
+
+    private readonly marketData = toSignal(
+        this.refreshTrigger$.pipe(
+            startWith(false as boolean),
+            tap(() => this.isMarketLoading.set(true)),
+            switchMap((forceRefresh) => this.apiService.getDashboard(forceRefresh as boolean)),
+            tap(() => this.isMarketLoading.set(false)),
+        ),
+    );
+
+    private readonly overviewData = toSignal(
         combineLatest([
-            this.refreshTrigger$.pipe(startWith(false)),
+            this.refreshTrigger$.pipe(startWith(false as boolean)),
             this.rangeTrigger$,
             this.benchmarkTicker$,
             this.benchmarkEnvelopes$,
         ]).pipe(
             tap(() => this.isChartLoading.set(true)),
-            switchMap(([forceRefresh, range, ticker, envIds]) =>
-                forkJoin({
-                    dashboard: this.apiService.getDashboard(forceRefresh),
-                    overview: this.apiService.getEnvelopesOverview(range, ticker, envIds),
-                }),
+            switchMap(([, range, ticker, envIds]) =>
+                this.apiService.getEnvelopesOverview(range, ticker, envIds),
             ),
             tap(() => this.isChartLoading.set(false)),
         ),
     );
 
-    readonly totals = computed<DashboardTotals>(
-        () =>
-            this.data()?.dashboard.totals ?? {
-                total_value: 0,
-                total_cash: 0,
-                total_cost_basis: 0,
-                total_pnl: 0,
-                total_pnl_pct: 0,
-                total_change_1d: 0,
-                total_change_1d_pct: 0,
-                net_deposits: { '30d': 0, '90d': 0, '180d': 0, '1y': 0, '5y': 0 },
-                dividend_income_90d: 0,
-            },
-    );
+    /** True once the fast ledger slice has arrived — gates envelopes + ledger render. */
+    readonly isLedgerLoaded = computed(() => this.ledgerData() !== undefined);
+    /** True once live market data has arrived — gates positions, watchlist, full totals. */
+    readonly isMarketLoaded = computed(() => this.marketData() !== undefined);
+    /** Backward-compatible alias — true when market data (the meaningful payload) is ready. */
+    readonly isDataLoaded = computed(() => this.isMarketLoaded());
+    /** True while any of the three independent data streams is still in flight. */
+    readonly isAnyLoading = computed(() => this.isLedgerLoading() || this.isMarketLoading() || this.isChartLoading());
 
-    readonly currencySymbol = linkedSignal(() => this.data()?.dashboard.user_currency ?? '€');
+    readonly totals = computed<DashboardTotals>(() => {
+        const market = this.marketData();
+        if (market) return market.totals;
+        // While market data loads, surface what we already know from the ledger
+        const ledger = this.ledgerData();
+        return {
+            total_value:         ledger?.static_totals.total_cash ?? 0,
+            total_cash:          ledger?.static_totals.total_cash ?? 0,
+            total_cost_basis:    0,
+            total_pnl:           0,
+            total_pnl_pct:       0,
+            total_change_1d:     0,
+            total_change_1d_pct: 0,
+            net_deposits:        ledger?.static_totals.net_deposits ?? { '30d': 0, '90d': 0, '180d': 0, '1y': 0, '5y': 0 },
+            dividend_income_90d: ledger?.static_totals.dividend_income_90d ?? 0,
+        };
+    });
+
+    readonly currencySymbol = linkedSignal(
+        () => this.marketData()?.user_currency ?? this.ledgerData()?.user_currency ?? '€',
+    );
 
     readonly depositEntries: Array<{ key: DepositPeriod; label: string }> = [
         { key: '30d', label: '1M' },
@@ -248,22 +297,79 @@ export class DashboardComponent {
     readonly trending = signal<WatchlistRow[]>([]);
     readonly viewSettings = signal(false);
 
+    readonly watchlistSortField = signal<'name' | 'variation'>('name');
+    readonly watchlistSortDir = signal<'asc' | 'desc'>('asc');
+
+    readonly sortedWatchlist = computed(() => {
+        const field = this.watchlistSortField();
+        const dir = this.watchlistSortDir();
+        return [...this.watchlist()].sort((a, b) => {
+            const cmp =
+                field === 'name'
+                    ? (a.name || a.ticker).localeCompare(b.name || b.ticker)
+                    : a.change_1d_pct - b.change_1d_pct;
+            return dir === 'asc' ? cmp : -cmp;
+        });
+    });
+
+    toggleWatchlistSort(field: 'name' | 'variation'): void {
+        if (this.watchlistSortField() === field) {
+            this.watchlistSortDir.update((d) => (d === 'asc' ? 'desc' : 'asc'));
+        } else {
+            this.watchlistSortField.set(field);
+            this.watchlistSortDir.set('asc');
+        }
+    }
+
+    // ── Earnings calendar ─────────────────────────────────────────────────────
+
+    readonly earningsCalendar = signal<EarningsCalendarResponse | null>(null);
+    readonly isEarningsLoading = signal(false);
+    readonly earningsLoaded = signal(false);
+    readonly earningsDateFilter = signal<string | null>(null);
+    readonly today = new Date().toISOString().slice(0, 10);
+
+    readonly earningsDates = computed<string[]>(() => {
+        const cal = this.earningsCalendar();
+        const fromEntries = cal ? cal.entries.map((e) => e.earnings_date) : [];
+        return [...new Set([...fromEntries, this.today])].sort();
+    });
+
+    readonly earningsEntries = computed(() => {
+        const cal = this.earningsCalendar();
+        if (!cal) return [];
+        const filter = this.earningsDateFilter();
+        const entries = filter ? cal.entries.filter((e) => e.earnings_date === filter) : cal.entries;
+        return [...entries].sort((a, b) => {
+            const dateCmp = a.earnings_date.localeCompare(b.earnings_date);
+            if (dateCmp !== 0) return dateCmp;
+            return this.earningsHistoryChange(a.history) - this.earningsHistoryChange(b.history);
+        });
+    });
+
     readonly positions = computed(() => {
-        const raw = this.data()?.dashboard.positions ?? [];
+        const raw = this.marketData()?.positions ?? [];
         return [...raw].sort((a, b) => {
             const envCmp = a.envelope_name.localeCompare(b.envelope_name);
             return envCmp !== 0 ? envCmp : b.current_value - a.current_value;
         });
     });
 
-    readonly transactions = computed(() => this.data()?.dashboard.transactions ?? []);
-    readonly envelopes = computed(() => this.data()?.dashboard.envelopes ?? []);
-    readonly overviewStats = computed<EnvelopeStats | null>(() => this.data()?.overview.stats ?? null);
-    readonly chartSeries = computed(() => this.data()?.overview.series ?? []);
-    readonly chartDates = computed(() => this.data()?.overview.dates ?? []);
-    readonly chartBenchmarkPct = computed(() => this.data()?.overview.benchmark_pct ?? []);
-    readonly chartPortfolioPct = computed(() => this.data()?.overview.portfolio_pct ?? []);
-    readonly benchmarkLabel = computed(() => this.data()?.overview.benchmark_ticker ?? 'XWD.TO');
+    // Transactions and envelopes come from the ledger immediately, then the
+    // market response supersedes them (same data, just re-verified).
+    readonly transactions = computed(
+        () => this.marketData()?.transactions ?? this.ledgerData()?.transactions ?? [],
+    );
+    readonly envelopes = computed(
+        () => this.marketData()?.envelopes ?? this.ledgerData()?.envelopes ?? [],
+    );
+
+    readonly overviewStats = computed<EnvelopeStats | null>(() => this.overviewData()?.stats ?? null);
+    readonly chartSeries = computed(() => this.overviewData()?.series ?? []);
+    readonly chartDates = computed(() => this.overviewData()?.dates ?? []);
+    readonly chartBenchmarkPct = computed(() => this.overviewData()?.benchmark_pct ?? []);
+    readonly chartPortfolioPct = computed(() => this.overviewData()?.portfolio_pct ?? []);
+    readonly benchmarkLabel = computed(() => this.overviewData()?.benchmark_ticker ?? 'XWD.TO');
     readonly portfolioLabel = computed(() => {
         const envs = this.selectedBenchmarkEnvelopes();
         if (envs.length === 0) return 'Portfolio';
@@ -271,8 +377,6 @@ export class DashboardComponent {
         return envs.map((e) => e.name).join(', ');
     });
     readonly isDarkMode = computed(() => this.utilsService.darkMode());
-    /** True once the first API response has resolved — guards against flashing empty states on initial load. */
-    readonly isDataLoaded = computed(() => this.data() !== undefined);
 
     /**
      * Case A: user has no portfolio data at all (no positions and no transactions).
@@ -280,7 +384,8 @@ export class DashboardComponent {
      */
     readonly hasAnyPortfolioData = computed(
         () =>
-            (this.data()?.dashboard.positions.length ?? 0) > 0 || (this.data()?.dashboard.transactions.length ?? 0) > 0,
+            (this.marketData()?.positions.length ?? this.ledgerData()?.raw_positions.length ?? 0) > 0 ||
+            (this.marketData()?.transactions.length ?? this.ledgerData()?.transactions.length ?? 0) > 0,
     );
 
     /**
@@ -294,7 +399,7 @@ export class DashboardComponent {
      * data change rather than once per row render in the group-header template.
      */
     readonly envelopeMetrics = computed(() => {
-        const positions = this.data()?.dashboard.positions ?? [];
+        const positions = this.marketData()?.positions ?? [];
         return positions.reduce<
             Record<string, { invested: number; pnl: number; allocation: number; cost_basis: number }>
         >((acc, p) => {
@@ -321,13 +426,13 @@ export class DashboardComponent {
 
     readonly userAlerts = signal<AlertOut[]>([]);
     readonly alertsModalVisible = signal(false);
-    readonly alertsModalTicker = signal<WatchlistRow>({} as WatchlistRow);
+    readonly alertsModalTicker = signal<AlertableTicker>({} as AlertableTicker);
 
     hasAlertsFor(ticker: string): boolean {
         return this.userAlerts().some((a) => a.ticker === ticker);
     }
 
-    openAlertsModal(ticker: WatchlistRow, event: Event): void {
+    openAlertsModal(ticker: AlertableTicker, event: Event): void {
         event.stopPropagation();
         this.alertsModalTicker.set(ticker);
         this.alertsModalVisible.set(true);
@@ -340,6 +445,16 @@ export class DashboardComponent {
             .subscribe({
                 next: (alerts) => this.userAlerts.set(alerts),
             });
+    }
+
+    // ── Envelope stats modal ──────────────────────────────────────────────────
+
+    readonly envelopeStatsVisible = signal(false);
+    readonly envelopeStatsTarget = signal<EnvelopeSummary | null>(null);
+
+    openEnvelopeStats(env: EnvelopeSummary): void {
+        this.envelopeStatsTarget.set(env);
+        this.envelopeStatsVisible.set(true);
     }
 
     // ── Envelope dialog ───────────────────────────────────────────────────────
@@ -387,6 +502,7 @@ export class DashboardComponent {
     readonly bulkPasteContent = new FormControl('', { nonNullable: true });
 
     readonly projectionForm = new FormGroup({
+        initial_balance: new FormControl<number | null>(null, { validators: [Validators.min(0)] }),
         deposit: new FormControl<number>(0, { nonNullable: true, validators: [Validators.min(0)] }),
         annual_rate_pct: new FormControl<number>(7.0, {
             nonNullable: true,
@@ -520,7 +636,7 @@ export class DashboardComponent {
         });
 
         effect(() => {
-            const rows = this.data()?.dashboard.watchlist;
+            const rows = this.marketData()?.watchlist;
             if (rows) this.watchlist.set(rows);
         });
 
@@ -531,6 +647,30 @@ export class DashboardComponent {
         this.projectionForm.valueChanges.pipe(debounceTime(400), takeUntilDestroyed()).subscribe(() => {
             if (this.projectionMode()) this.runProjection();
         });
+
+        this.projectionTrigger$
+            .pipe(
+                switchMap((request) =>
+                    this.apiService.postProjection(request).pipe(
+                        catchError(() => {
+                            this.isProjectionLoading.set(false);
+                            return EMPTY;
+                        }),
+                    ),
+                ),
+                takeUntilDestroyed(),
+            )
+            .subscribe((data) => {
+                this.projectionData.set(data);
+                this.isProjectionLoading.set(false);
+                if (this.lastProjectionBalance === null) {
+                    this.liveProjectionBalance.set(data.inputs.initial_balance);
+                    this.projectionForm.patchValue(
+                        { initial_balance: data.inputs.initial_balance },
+                        { emitEvent: false },
+                    );
+                }
+            });
 
         this.apiService
             .getAlerts()
@@ -547,6 +687,7 @@ export class DashboardComponent {
                     if (settings.dark_mode != null) this.utilsService.applyDarkMode(settings.dark_mode);
                 },
             });
+
     }
 
     // ── Chart rendering (preserved as-is per product spec) ───────────────────
@@ -831,6 +972,8 @@ export class DashboardComponent {
                                 }).format(val);
                             const formatNumber = (val: number) =>
                                 new Intl.NumberFormat(navigator.language, { maximumFractionDigits: 4 }).format(val);
+                            const esc = (s: string) =>
+                                s.replace(/[<>&"']/g, (c) => ({'<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;'}[c] ?? c));
 
                             const index = tooltip.dataPoints[0].dataIndex;
                             const dayTxs = txByDateIndex.get(index) || [];
@@ -914,7 +1057,7 @@ export class DashboardComponent {
                     <div class="flex justify-between items-center">
                       <div class="flex items-center gap-2">
                         <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded flex items-center border ${badgeClass}">${actionLabel}</span>
-                        <span class="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">${firstTx.envelope_name}</span>
+                        <span class="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">${esc(firstTx.envelope_name)}</span>
                       </div>
                     </div>`;
 
@@ -928,7 +1071,7 @@ export class DashboardComponent {
                                             html += `
                         <div class="flex justify-between items-center">
                           <div class="flex items-center gap-2">
-                            <span class="text-xs font-bold text-slate-900 dark:text-zinc-50">${tx.ticker}</span>
+                            <span class="text-xs font-bold text-slate-900 dark:text-zinc-50">${esc(tx.ticker ?? '')}</span>
                             <span class="text-[10px] text-slate-500 dark:text-zinc-400 font-medium bg-white dark:bg-zinc-700 px-1.5 py-0.5 border border-slate-200 dark:border-zinc-600 rounded-md">
                               ${formatNumber(tx.shares)} × ${formatCurrency(tx.price)} €
                             </span>
@@ -1131,6 +1274,8 @@ export class DashboardComponent {
                                 return;
                             }
 
+                            const esc = (s: string) =>
+                                s.replace(/[<>&"']/g, (c) => ({'<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;'}[c] ?? c));
                             let total = 0;
                             let html = `<div class="bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border border-slate-200/60 dark:border-zinc-700/60 shadow-2xl shadow-slate-200/50 dark:shadow-zinc-900/50 rounded-2xl p-4 w-[280px]">`;
                             html += `<p class="text-xs font-extrabold text-slate-400 dark:text-zinc-500 mb-3 uppercase tracking-widest">${tooltip.title[0]}</p>`;
@@ -1143,7 +1288,7 @@ export class DashboardComponent {
                   <div class="flex justify-between items-center gap-4 mb-2">
                     <div class="flex items-center gap-2">
                       <span class="w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 shadow-sm" style="background-color: ${color}"></span>
-                      <span class="text-[13px] font-semibold text-slate-700 dark:text-zinc-300">${dp.dataset.label}</span>
+                      <span class="text-[13px] font-semibold text-slate-700 dark:text-zinc-300">${esc(dp.dataset.label ?? '')}</span>
                     </div>
                     <span class="text-[13px] font-medium text-slate-900 dark:text-zinc-50 font-mono tracking-tight">${fmt(val)} ${currency}</span>
                   </div>`;
@@ -1174,6 +1319,34 @@ export class DashboardComponent {
                 },
             },
         });
+    }
+
+    // ── Earnings helpers ──────────────────────────────────────────────────────
+
+    earningsHistoryChange(history: PricePoint[]): number {
+        if (history.length < 2) return 0;
+        const first = history[0].close;
+        const last = history[history.length - 1].close;
+        return first ? ((last - first) / first) * 100 : 0;
+    }
+
+    isEarningsUpcoming(dateStr: string): boolean {
+        return dateStr >= this.today;
+    }
+
+    fetchEarnings(): void {
+        this.isEarningsLoading.set(true);
+        this.earningsLoaded.set(true);
+        this.apiService
+            .getEarningsCalendar()
+            .pipe(take(1), takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+                next: (data) => {
+                    this.earningsCalendar.set(data);
+                    this.isEarningsLoading.set(false);
+                },
+                error: () => this.isEarningsLoading.set(false),
+            });
     }
 
     // ── Sparkline helper ──────────────────────────────────────────────────────
@@ -1433,7 +1606,7 @@ export class DashboardComponent {
 
                     let ticker = null,
                         shares = null,
-                        price: number,
+                        price: number = NaN,
                         fees = 0;
 
                     if (type === 'BUY' || type === 'SELL') {
@@ -1456,12 +1629,12 @@ export class DashboardComponent {
                         price = parseFloat(rest[1].replace(',', '.'));
                     }
 
-                    if (isNaN(price!)) throw new Error(`Line ${i + 1}: invalid numeric value.`);
+                    if (isNaN(price)) throw new Error(`Line ${i + 1}: invalid numeric value.`);
 
                     parsed.push({ type, envelope_name, date: isoDate, ticker, shares, price, fees, note: null });
                 }
-            } catch (e: any) {
-                this.isParsingError.set(e.message);
+            } catch (e: unknown) {
+                this.isParsingError.set(e instanceof Error ? e.message : String(e));
                 this.isCreatingTransaction.set(false);
                 return;
             }
@@ -1509,7 +1682,7 @@ export class DashboardComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
                 next: () => this.refreshTrigger$.next(false),
-                error: (err) => console.error('Failed to delete transaction', err),
+                error: () => {},
             });
     }
 
@@ -1529,7 +1702,7 @@ export class DashboardComponent {
                 next: (res) => {
                     if (res.ticker) this.watchlist.update((list) => [...list, res.ticker!]);
                 },
-                error: (err) => console.error('Failed to add to watchlist', err),
+                error: () => {},
             });
     }
 
@@ -1561,7 +1734,7 @@ export class DashboardComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
                 next: () => this.watchlist.update((list) => list.filter((w) => w.ticker !== ticker)),
-                error: (err) => console.error('Failed to remove from watchlist', err),
+                error: () => {},
             });
     }
 
@@ -1603,23 +1776,27 @@ export class DashboardComponent {
             this.runProjection();
         } else {
             this.projectionData.set(null);
+            this.liveProjectionBalance.set(null);
+            this.projectionForm.patchValue({ initial_balance: null }, { emitEvent: false });
         }
     }
 
     private runProjection(): void {
         if (this.projectionForm.invalid) return;
-        const { deposit, annual_rate_pct, deposit_frequency } = this.projectionForm.getRawValue();
+        const { deposit, annual_rate_pct, deposit_frequency, initial_balance } = this.projectionForm.getRawValue();
+        const request: ProjectionRequest = { deposit, annual_rate_pct, deposit_frequency };
+        if (initial_balance !== null) request.initial_balance = initial_balance;
+        this.lastProjectionBalance = initial_balance;
         this.isProjectionLoading.set(true);
-        this.apiService
-            .postProjection({ deposit, annual_rate_pct, deposit_frequency })
-            .pipe(take(1), takeUntilDestroyed(this.destroyRef))
-            .subscribe({
-                next: (data) => {
-                    this.projectionData.set(data);
-                    this.isProjectionLoading.set(false);
-                },
-                error: () => this.isProjectionLoading.set(false),
-            });
+        this.projectionTrigger$.next(request);
+    }
+
+    resetProjectionBalance(): void {
+        const live = this.liveProjectionBalance();
+        if (live !== null) {
+            this.projectionForm.patchValue({ initial_balance: live }, { emitEvent: false });
+            this.runProjection();
+        }
     }
 
     setBenchmarkTicker(value: string): void {

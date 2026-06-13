@@ -31,6 +31,7 @@ export class SettingsModalComponent {
     readonly saveError = signal<string | null>(null);
 
     readonly isDarkMode = computed(() => this.utilsService.darkMode());
+    readonly earningsNotify = signal<boolean>(true);
 
     readonly form = new FormGroup({
         currency: new FormControl<string>('', { nonNullable: true }),
@@ -64,6 +65,7 @@ export class SettingsModalComponent {
                         apprise_url: settings.apprise_url ?? '',
                     });
                     if (settings.dark_mode != null) this.utilsService.applyDarkMode(settings.dark_mode);
+                    this.earningsNotify.set(settings.earnings_notify ?? true);
                     this.isLoading.set(false);
                 },
                 error: () => this.isLoading.set(false),
@@ -78,6 +80,7 @@ export class SettingsModalComponent {
             currency: currency.trim() || null,
             apprise_url: apprise_url.trim() || null,
             dark_mode: this.utilsService.darkMode(),
+            earnings_notify: this.earningsNotify(),
         };
         this.apiService
             .updateSettings(payload)

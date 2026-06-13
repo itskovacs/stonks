@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 import jwt
 from argon2 import PasswordHasher
 from argon2 import exceptions as argon_exceptions
+from fastapi import HTTPException
 
 from config import get_settings
 from models.schemas import Token
@@ -75,8 +76,6 @@ def create_tokens(data: dict) -> Token:
 
 def verify_exists_and_owns(username: str, obj: object) -> None:
     """Raises HTTPException if obj is missing or belongs to a different user."""
-    from fastapi import HTTPException
-
     if not obj:
         raise HTTPException(status_code=404, detail="The resource does not exist")
     if getattr(obj, "user", None) != username:

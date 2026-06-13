@@ -88,7 +88,7 @@ def _parse_date(entry: feedparser.FeedParserDict) -> str:
                 dt = parsedate_to_datetime(raw)
                 return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             except Exception:
-                return raw
+                pass
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

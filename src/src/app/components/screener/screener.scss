@@ -1,0 +1,6 @@
+/* Shared grid layout for the header row and every data row */
+.screener-row {
+    display: grid;
+    grid-template-columns: 88px minmax(120px, 1fr) 80px 60px 60px 60px 52px 64px 60px 60px 56px 64px 60px 92px;
+    align-items: center;
+}

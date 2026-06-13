@@ -1,0 +1,326 @@
+<div
+    class="max-w-7xl xl:max-w-360 2xl:max-w-400 mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-4 bg-primary-50 dark:bg-primary-900 text-primary-900 dark:text-primary-50 font-sans antialiased min-h-screen">
+
+    <!-- Back link + page title -->
+    <div class="flex items-center gap-3">
+        <a routerLink="/"
+            class="flex items-center gap-1.5 text-[11px] font-semibold text-primary-400 hover:text-primary-700 dark:hover:text-primary-200 transition-colors cursor-pointer">
+            <i class="pi pi-arrow-left text-[10px]"></i> Dashboard
+        </a>
+        <span class="text-primary-300 dark:text-primary-600">·</span>
+        <h1 class="text-sm font-black text-primary-900 dark:text-primary-50">Screener</h1>
+    </div>
+
+    <!-- Main card -->
+    <section
+        class="bg-white dark:bg-primary-800 border border-primary-200 dark:border-primary-700 rounded-xl overflow-hidden">
+
+        <!-- Header: filter pills + count -->
+        <div
+            class="px-5 py-4 flex flex-wrap items-center justify-between gap-3 border-b border-primary-100 dark:border-primary-700">
+            <div class="flex items-center gap-3">
+                <span class="text-sm font-bold text-primary-900 dark:text-primary-50">Watchlist</span>
+                @if (!isLoading()) {
+                    <span
+                        class="text-[10px] font-bold text-primary-400 dark:text-primary-500 tabular-nums bg-primary-100 dark:bg-primary-700 px-2 py-0.5 rounded-full">
+                        {{ filteredRows().length }}
+                    </span>
+                }
+            </div>
+
+            <!-- Filter pills -->
+            <div class="flex items-center gap-2">
+                @for (pill of filterPills; track pill.value) {
+                    <button (click)="filterSignal.set(pill.value)"
+                        class="text-[9px] font-semibold uppercase tracking-wider border rounded-md px-3 py-1.5 transition-all cursor-pointer"
+                        [class]="filterSignal() === pill.value
+                            ? pill.activeClass
+                            : 'text-primary-600 dark:text-primary-300 border-primary-200 dark:border-primary-600 bg-white dark:bg-transparent hover:bg-primary-900 hover:text-white hover:border-primary-900 dark:hover:bg-primary-700 dark:hover:text-primary-50'">
+                        {{ pill.label }}
+                    </button>
+                }
+            </div>
+        </div>
+
+        <!-- Table with horizontal scroll on mobile -->
+        <div class="overflow-x-auto">
+            <div class="min-w-[980px]">
+
+                <!-- Column headers -->
+                <div
+                    class="screener-row px-4 py-2 bg-primary-50 dark:bg-primary-900/40 border-b border-primary-100 dark:border-primary-700">
+
+                    <!-- Ticker -->
+                    <button (click)="toggleSort('ticker')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        Ticker <i [class]="sortIcon('ticker') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- Name -->
+                    <button (click)="toggleSort('name')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        Name <i [class]="sortIcon('name') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- Price -->
+                    <button (click)="toggleSort('price')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        Price <i [class]="sortIcon('price') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- 1D% -->
+                    <button (click)="toggleSort('change_1d_pct')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        1D% <i [class]="sortIcon('change_1d_pct') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- 5D% -->
+                    <button (click)="toggleSort('change_5d_pct')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        5D% <i [class]="sortIcon('change_5d_pct') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- 1M% -->
+                    <button (click)="toggleSort('change_1m_pct')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        1M% <i [class]="sortIcon('change_1m_pct') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- RSI -->
+                    <button (click)="toggleSort('rsi_14')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        RSI <i [class]="sortIcon('rsi_14') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- Boll%B -->
+                    <button (click)="toggleSort('bollinger_b')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        Boll%B <i [class]="sortIcon('bollinger_b') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- MACD -->
+                    <button (click)="toggleSort('macd_signal')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        MACD <i [class]="sortIcon('macd_signal') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- SMA -->
+                    <button (click)="toggleSort('sma_signal')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        SMA <i [class]="sortIcon('sma_signal') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- Stoch -->
+                    <button (click)="toggleSort('stochastic_k')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        Stoch <i [class]="sortIcon('stochastic_k') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- Vol -->
+                    <button (click)="toggleSort('volume_trend_ratio')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        Vol <i [class]="sortIcon('volume_trend_ratio') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- Buy% -->
+                    <button (click)="toggleSort('buy_pct')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        Buy% <i [class]="sortIcon('buy_pct') + ' text-[8px]!'"></i>
+                    </button>
+
+                    <!-- Sentiment -->
+                    <button (click)="toggleSort('sentiment_score')"
+                        class="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-primary-500 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-100 transition-colors cursor-pointer">
+                        Sentiment <i [class]="sortIcon('sentiment_score') + ' text-[8px]!'"></i>
+                    </button>
+                </div>
+
+                <!-- Loading skeletons -->
+                @if (isLoading()) {
+                    @for (i of [1,2,3,4,5,6]; track i) {
+                        <div class="screener-row px-4 py-3 border-b border-primary-50 dark:border-primary-700/50 gap-x-2">
+                            @for (j of [1,2,3,4,5,6,7,8,9,10,11,12,13,14]; track j) {
+                                <p-skeleton height="0.75rem" [style]="{ width: j === 2 ? '100%' : '60%' }" />
+                            }
+                        </div>
+                    }
+                }
+
+                <!-- Data rows -->
+                @if (!isLoading()) {
+                    @for (row of filteredRows(); track row.ticker) {
+                        <div class="screener-row px-4 py-2.5 border-b border-primary-50 dark:border-primary-700/40
+                                    hover:bg-primary-50 dark:hover:bg-primary-700/30 transition-colors cursor-pointer"
+                             [routerLink]="'/ticker/' + row.ticker">
+
+                            <!-- Ticker + held dot -->
+                            <div class="flex items-center gap-1.5 min-w-0">
+                                @if (row.is_held) {
+                                    <span class="shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-500"
+                                          title="Currently held"></span>
+                                }
+                                <span class="text-xs font-black text-primary-900 dark:text-primary-50 truncate">
+                                    {{ row.ticker }}
+                                </span>
+                            </div>
+
+                            <!-- Name -->
+                            <span
+                                class="text-[11px] text-primary-500 dark:text-primary-400 truncate pr-2">{{ row.name }}</span>
+
+                            <!-- Price -->
+                            <span
+                                class="text-xs font-mono font-bold tabular-nums text-primary-900 dark:text-primary-50">
+                                {{ row.current_price | number:'1.2-2' }}
+                            </span>
+
+                            <!-- 1D% -->
+                            <span class="text-[11px] font-bold tabular-nums"
+                                [class]="row.change_1d_pct >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'">
+                                {{ row.change_1d_pct >= 0 ? '+' : '' }}{{ row.change_1d_pct | number:'1.2-2' }}%
+                            </span>
+
+                            <!-- 5D% -->
+                            @if (row.change_5d_pct != null) {
+                                <span class="text-[11px] font-bold tabular-nums"
+                                    [class]="row.change_5d_pct >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'">
+                                    {{ row.change_5d_pct >= 0 ? '+' : '' }}{{ row.change_5d_pct | number:'1.1-1' }}%
+                                </span>
+                            } @else {
+                                <span class="text-[11px] text-primary-300 dark:text-primary-600">—</span>
+                            }
+
+                            <!-- 1M% -->
+                            @if (row.change_1m_pct != null) {
+                                <span class="text-[11px] font-bold tabular-nums"
+                                    [class]="row.change_1m_pct >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'">
+                                    {{ row.change_1m_pct >= 0 ? '+' : '' }}{{ row.change_1m_pct | number:'1.1-1' }}%
+                                </span>
+                            } @else {
+                                <span class="text-[11px] text-primary-300 dark:text-primary-600">—</span>
+                            }
+
+                            <!-- RSI -->
+                            @if (row.rsi_14 != null) {
+                                <span class="text-[11px] font-mono font-bold tabular-nums"
+                                    [class]="row.rsi_14 >= 70 ? 'text-red-500 dark:text-red-400' : row.rsi_14 <= 30 ? 'text-emerald-600 dark:text-emerald-400' : 'text-primary-700 dark:text-primary-300'">
+                                    {{ row.rsi_14 | number:'1.0-0' }}
+                                </span>
+                            } @else {
+                                <span class="text-[11px] text-primary-300 dark:text-primary-600">—</span>
+                            }
+
+                            <!-- Bollinger %B -->
+                            @if (row.bollinger_b != null) {
+                                <span class="text-[11px] font-mono tabular-nums px-1.5 py-0.5 rounded text-center"
+                                    [class]="signalClass(row.bollinger_signal)">
+                                    {{ row.bollinger_b | number:'1.2-2' }}
+                                </span>
+                            } @else {
+                                <span class="text-[11px] text-primary-300 dark:text-primary-600">—</span>
+                            }
+
+                            <!-- MACD -->
+                            @if (row.macd_signal) {
+                                <span class="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded text-center"
+                                    [class]="signalClass(row.macd_signal)">
+                                    {{ row.macd_signal }}
+                                </span>
+                            } @else {
+                                <span class="text-[11px] text-primary-300 dark:text-primary-600">—</span>
+                            }
+
+                            <!-- SMA -->
+                            @if (row.sma_signal) {
+                                <span class="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded text-center"
+                                    [class]="signalClass(row.sma_signal)">
+                                    {{ row.sma_signal }}
+                                </span>
+                            } @else {
+                                <span class="text-[11px] text-primary-300 dark:text-primary-600">—</span>
+                            }
+
+                            <!-- Stochastic %K -->
+                            @if (row.stochastic_k != null) {
+                                <span class="text-[11px] font-mono tabular-nums"
+                                    [class]="row.stochastic_k >= 80 ? 'text-red-500 dark:text-red-400' : row.stochastic_k <= 20 ? 'text-emerald-600 dark:text-emerald-400' : 'text-primary-700 dark:text-primary-300'">
+                                    {{ row.stochastic_k | number:'1.0-0' }}
+                                </span>
+                            } @else {
+                                <span class="text-[11px] text-primary-300 dark:text-primary-600">—</span>
+                            }
+
+                            <!-- Volume Trend -->
+                            @if (row.volume_trend_signal) {
+                                <span class="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded text-center"
+                                    [class]="signalClass(row.volume_trend_signal)">
+                                    {{ row.volume_trend_ratio | number:'1.1-1' }}×
+                                </span>
+                            } @else {
+                                <span class="text-[11px] text-primary-300 dark:text-primary-600">—</span>
+                            }
+
+                            <!-- Buy% signal bar -->
+                            <div class="flex flex-col gap-0.5">
+                                <span class="text-[10px] font-bold tabular-nums"
+                                    [class]="row.buy_pct >= 60 ? 'text-emerald-600 dark:text-emerald-400' : row.sell_pct >= 60 ? 'text-red-500 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'">
+                                    {{ row.buy_pct }}%
+                                </span>
+                                <!-- Mini signal bar -->
+                                <div class="flex h-1 rounded-full overflow-hidden w-full gap-px">
+                                    <div class="bg-emerald-500 rounded-l-full" [style.width.%]="row.buy_pct"></div>
+                                    <div class="bg-amber-400" [style.width.%]="row.hold_pct"></div>
+                                    <div class="bg-red-400 rounded-r-full flex-1"></div>
+                                </div>
+                            </div>
+
+                            <!-- Sentiment (lazy) -->
+                            <div class="flex items-center" (click)="$event.stopPropagation()">
+                                @if (row.sentiment_loading) {
+                                    <p-skeleton width="60px" height="1.25rem" />
+                                } @else if (row.sentiment_score !== null) {
+                                    <span class="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                                        [class]="sentimentClass(row.sentiment_label)">
+                                        {{ row.sentiment_label }}
+                                        <span class="ml-1 tabular-nums opacity-75">
+                                            {{ row.sentiment_score > 0 ? '+' : '' }}{{ row.sentiment_score | number:'1.2-2' }}
+                                        </span>
+                                    </span>
+                                } @else {
+                                    <button (click)="loadSentiment($event, row.ticker)"
+                                        class="text-[9px] font-semibold text-primary-400 dark:text-primary-500 border border-primary-200 dark:border-primary-600 rounded px-1.5 py-0.5 hover:text-primary-700 dark:hover:text-primary-300 hover:border-primary-400 transition-colors cursor-pointer">
+                                        Load
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    } @empty {
+                        <div class="py-14 text-center">
+                            <p class="text-sm font-bold text-primary-500 dark:text-primary-400">
+                                No tickers match this filter.
+                            </p>
+                            <p class="text-xs text-primary-400 dark:text-primary-500 mt-1">
+                                Try a different signal filter or add tickers to your watchlist.
+                            </p>
+                        </div>
+                    }
+                }
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Legend -->
+    @if (!isLoading() && rows().length > 0) {
+        <p class="text-[10px] text-primary-400 dark:text-primary-500 px-1">
+            <span class="inline-flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Currently held position
+            </span>
+            &nbsp;·&nbsp; RSI &lt;30 oversold / &gt;70 overbought
+            &nbsp;·&nbsp; Boll%B &lt;0 below lower band / &gt;1 above upper band
+            &nbsp;·&nbsp; Stoch &lt;20 oversold / &gt;80 overbought
+            &nbsp;·&nbsp; Sentiment loaded on demand — 3 live RSS requests per ticker
+        </p>
+    }
+
+</div>

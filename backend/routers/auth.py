@@ -19,7 +19,7 @@ from config import get_settings
 from deps import SessionDep
 from models.models import User
 from models.schemas import AuthParams, LoginRegisterModel, Token
-from security import create_access_token, create_tokens, hash_password, verify_password
+from security import create_access_token, create_refresh_token, create_tokens, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -42,7 +42,7 @@ def register(req: LoginRegisterModel, session: SessionDep) -> Token:
     if not get_settings().REGISTER_ENABLE:
         raise HTTPException(status_code=403, detail="Registration is disabled")
     if session.get(User, req.username):
-        raise HTTPException(status_code=409, detail="Username already taken")
+        raise HTTPException(status_code=409, detail="Registration failed")
     session.add(User(username=req.username, hashed_password=hash_password(req.password)))
     session.commit()
     return create_tokens(data={"sub": req.username})
@@ -81,5 +81,5 @@ def refresh_token(
 
     return Token(
         access_token=create_access_token(data={"sub": username}),
-        refresh_token=token,  # reuse existing refresh token until it expires
+        refresh_token=create_refresh_token(data={"sub": username}),
     )

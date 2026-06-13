@@ -1,0 +1,291 @@
+@if (visible()) {
+@let env = envelope();
+@let snap = snapshot();
+@let stats = periodStats();
+<section
+    class="modal-open fixed inset-0 flex items-center justify-center z-40 bg-primary-900/30 backdrop-blur-xl"
+    (click)="close()">
+    <div
+        class="w-11/12 max-w-screen md:max-w-2xl max-h-[90vh] bg-white dark:bg-primary-900 rounded-xl shadow-2xl flex flex-col overflow-clip"
+        (click)="$event.stopPropagation()">
+
+        <!-- Header -->
+        <div
+            class="flex-none flex items-center justify-between gap-4 p-4 md:p-5 border-b border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-800">
+            <div class="flex items-center gap-3 min-w-0">
+                <div
+                    class="size-9 rounded-lg flex items-center justify-center shrink-0"
+                    [style.background]="env.color + '22'"
+                    [style.border]="'1px solid ' + env.color + '55'">
+                    <div class="size-3 rounded-full" [style.background]="env.color"></div>
+                </div>
+                <div class="min-w-0">
+                    <h2 class="text-base font-bold text-primary-900 dark:text-white leading-none truncate">{{ env.name }}</h2>
+                    <p class="text-xs text-primary-500 dark:text-primary-400 mt-0.5 tabular-nums font-mono">
+                        {{ env.total_value | number:'1.2-2' }} {{ currency() }}
+                        @if (env.capital_in > 0) {
+                        <span class="ml-1.5 font-sans font-bold text-[10px] px-1 py-0.5 rounded"
+                            [class]="snap.hpr_pct >= 0 ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-red-50 text-red-500 dark:bg-red-900/20 dark:text-red-400'">
+                            {{ snap.hpr_pct >= 0 ? '+' : '' }}{{ snap.hpr_pct | number:'1.2-2' }}%
+                        </span>
+                        } @else {
+                        <span class="ml-1.5 font-sans font-bold text-[10px] px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400">
+                            Recouped
+                        </span>
+                        }
+                    </p>
+                </div>
+            </div>
+            <p-button (click)="close()" text severity="secondary" icon="pi pi-times" />
+        </div>
+
+        <!-- Body -->
+        <div class="flex-1 min-h-0 overflow-y-auto p-4 md:p-5 space-y-5">
+
+            <!-- ── Snapshot ─────────────────────────────────────────── -->
+            <div>
+                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-[0.13em] mb-2">Snapshot</p>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Equity</p>
+                        <p class="text-sm font-bold tabular-nums font-mono text-primary-900 dark:text-primary-50">
+                            {{ snap.equity | number:'1.0-0' }} {{ currency() }}
+                        </p>
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Cash</p>
+                        <p class="text-sm font-bold tabular-nums font-mono text-primary-900 dark:text-primary-50">
+                            {{ env.cash_available | number:'1.0-0' }} {{ currency() }}
+                        </p>
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Cost Basis</p>
+                        <p class="text-sm font-bold tabular-nums font-mono text-primary-900 dark:text-primary-50">
+                            {{ snap.cost_basis | number:'1.0-0' }} {{ currency() }}
+                        </p>
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">
+                            {{ env.capital_in >= 0 ? 'Capital In' : 'Net Withdrawn' }}
+                        </p>
+                        <p class="text-sm font-bold tabular-nums font-mono"
+                            [class]="env.capital_in < 0 ? 'text-emerald-500 dark:text-emerald-400' : 'text-primary-900 dark:text-primary-50'">
+                            {{ (env.capital_in < 0 ? -env.capital_in : env.capital_in) | number:'1.0-0' }} {{ currency() }}
+                        </p>
+                        @if (env.capital_in < 0) {
+                        <p class="text-[9px] text-emerald-500 dark:text-emerald-400 leading-tight mt-0.5">envelope fully recouped</p>
+                        }
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Unrealised P&L</p>
+                        <p class="text-sm font-bold tabular-nums font-mono" [class]="pnlClass(snap.unrealized_pnl)">
+                            {{ pnlSign(snap.unrealized_pnl) }}{{ snap.unrealized_pnl | number:'1.0-0' }} {{ currency() }}
+                        </p>
+                        <p class="text-[10px] tabular-nums" [class]="pnlClass(snap.unrealized_pnl_pct)">
+                            {{ pnlSign(snap.unrealized_pnl_pct) }}{{ snap.unrealized_pnl_pct | number:'1.2-2' }}%
+                        </p>
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">1-Day Change</p>
+                        <p class="text-sm font-bold tabular-nums font-mono" [class]="pnlClass(snap.change_1d)">
+                            {{ pnlSign(snap.change_1d) }}{{ snap.change_1d | number:'1.0-0' }} {{ currency() }}
+                        </p>
+                        <p class="text-[10px] tabular-nums" [class]="pnlClass(snap.change_1d_pct)">
+                            {{ pnlSign(snap.change_1d_pct) }}{{ snap.change_1d_pct | number:'1.2-2' }}%
+                        </p>
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">ROIC</p>
+                        <p class="text-sm font-bold tabular-nums" [class]="pnlClass(snap.roic_pct)">
+                            {{ pnlSign(snap.roic_pct) }}{{ snap.roic_pct | number:'1.2-2' }}%
+                        </p>
+                        <p class="text-[9px] text-primary-400 dark:text-primary-600 leading-tight mt-0.5">on deployed capital</p>
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Realised P&L</p>
+                        @if (snap.realized_pnl !== 0) {
+                        <p class="text-sm font-bold tabular-nums font-mono" [class]="pnlClass(snap.realized_pnl)">
+                            {{ pnlSign(snap.realized_pnl) }}{{ snap.realized_pnl | number:'1.0-0' }} {{ currency() }}
+                        </p>
+                        } @else {
+                        <p class="text-sm font-bold text-primary-300 dark:text-primary-700">—</p>
+                        }
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- ── Period Stats ─────────────────────────────────────── -->
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <p class="text-[9px] font-bold text-primary-400 uppercase tracking-[0.13em]">Period Stats</p>
+                    <div class="flex gap-0.5">
+                        @for (p of periods; track p.value) {
+                        <button
+                            (click)="selectPeriod(p.value)"
+                            class="text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+                            [class]="selectedPeriod() === p.value
+                                ? 'bg-primary-900 dark:bg-primary-100 text-white dark:text-primary-900'
+                                : 'text-primary-400 hover:text-primary-700 dark:hover:text-primary-200'">
+                            {{ p.label }}
+                        </button>
+                        }
+                    </div>
+                </div>
+
+                @if (isStatsLoading()) {
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    @for (i of [1,2,3,4,5,6,7,8]; track i) {
+                    <div class="h-14 bg-primary-100 dark:bg-primary-800 rounded-lg animate-pulse"></div>
+                    }
+                </div>
+                } @else if (stats) {
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Volatility (ann.)</p>
+                        @if (stats.volatility_annualized_pct != null) {
+                        <p class="text-sm font-bold tabular-nums text-primary-900 dark:text-primary-50">
+                            {{ stats.volatility_annualized_pct | number:'1.1-1' }}%
+                        </p>
+                        } @else {
+                        <p class="text-sm font-bold text-primary-300 dark:text-primary-700">—</p>
+                        }
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Best Day</p>
+                        @if (stats.best_day) {
+                        <p class="text-sm font-bold tabular-nums text-emerald-500 dark:text-emerald-400">
+                            +{{ stats.best_day.change_pct | number:'1.2-2' }}%
+                        </p>
+                        <p class="text-[9px] text-primary-400 tabular-nums">{{ stats.best_day.date | date:'dd MMM yy' }}</p>
+                        } @else {
+                        <p class="text-sm font-bold text-primary-300 dark:text-primary-700">—</p>
+                        }
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Worst Day</p>
+                        @if (stats.worst_day) {
+                        <p class="text-sm font-bold tabular-nums text-red-400">
+                            {{ stats.worst_day.change_pct | number:'1.2-2' }}%
+                        </p>
+                        <p class="text-[9px] text-primary-400 tabular-nums">{{ stats.worst_day.date | date:'dd MMM yy' }}</p>
+                        } @else {
+                        <p class="text-sm font-bold text-primary-300 dark:text-primary-700">—</p>
+                        }
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Trades</p>
+                        <p class="text-sm font-bold tabular-nums text-primary-900 dark:text-primary-50">{{ stats.trades_count }}</p>
+                        <p class="text-[9px] text-primary-400">{{ stats.tickers_held }} ticker{{ stats.tickers_held !== 1 ? 's' : '' }}</p>
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Net Deposits</p>
+                        <p class="text-sm font-bold tabular-nums font-mono" [class]="pnlClass(stats.net_deposits)">
+                            {{ pnlSign(stats.net_deposits) }}{{ stats.net_deposits | number:'1.0-0' }} {{ currency() }}
+                        </p>
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Dividends</p>
+                        @if (stats.dividend_income > 0) {
+                        <p class="text-sm font-bold tabular-nums font-mono text-violet-600 dark:text-violet-400">
+                            +{{ stats.dividend_income | number:'1.0-0' }} {{ currency() }}
+                        </p>
+                        } @else {
+                        <p class="text-sm font-bold text-primary-300 dark:text-primary-700">—</p>
+                        }
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Realised P&L</p>
+                        @if (periodRealizedPnl() !== 0) {
+                        <p class="text-sm font-bold tabular-nums font-mono" [class]="pnlClass(periodRealizedPnl())">
+                            {{ pnlSign(periodRealizedPnl()) }}{{ periodRealizedPnl() | number:'1.0-0' }} {{ currency() }}
+                        </p>
+                        <p class="text-[9px] text-primary-400 dark:text-primary-600 leading-tight mt-0.5">from period sells</p>
+                        } @else {
+                        <p class="text-sm font-bold text-primary-300 dark:text-primary-700">—</p>
+                        }
+                    </div>
+
+                    <div class="bg-primary-50 dark:bg-primary-800/60 rounded-lg p-3">
+                        <p class="text-[8px] font-bold text-primary-400 uppercase tracking-[0.12em] mb-1">Period Return</p>
+                        @if (periodReturnAbs() != null) {
+                        <p class="text-sm font-bold tabular-nums font-mono" [class]="pnlClass(periodReturnAbs()!)">
+                            {{ pnlSign(periodReturnAbs()!) }}{{ periodReturnAbs()! | number:'1.0-0' }} {{ currency() }}
+                        </p>
+                        <p class="text-[9px] text-primary-400 dark:text-primary-600 leading-tight mt-0.5">net of capital flows</p>
+                        } @else {
+                        <p class="text-sm font-bold text-primary-300 dark:text-primary-700">—</p>
+                        }
+                    </div>
+
+                </div>
+                }
+            </div>
+
+            <!-- ── Positions ────────────────────────────────────────── -->
+            @if (envPositions().length > 0) {
+            <div>
+                <p class="text-[9px] font-bold text-primary-400 uppercase tracking-[0.13em] mb-2">
+                    Positions ({{ envPositions().length }})
+                </p>
+                <div class="space-y-1.5">
+                    @for (pos of envPositions(); track pos.ticker) {
+                    <a [routerLink]="['/ticker', pos.ticker]" (click)="close()"
+                        class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-primary-50 dark:bg-primary-800/60 hover:bg-primary-100 dark:hover:bg-primary-800 transition-colors cursor-pointer group">
+
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm font-bold text-primary-900 dark:text-primary-50 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{{ pos.ticker }}</span>
+                                @if (pos.name) {
+                                <span class="text-[10px] text-primary-400 truncate hidden sm:block">{{ pos.name }}</span>
+                                }
+                            </div>
+                            <p class="text-[9px] text-primary-400 tabular-nums mt-0.5">
+                                {{ pos.shares | number:'1.0-4' }} × {{ pos.avg_cost | number:'1.2-2' }} {{ currency() }}
+                            </p>
+                        </div>
+
+                        <div class="text-right shrink-0">
+                            <p class="text-sm font-bold tabular-nums font-mono text-primary-900 dark:text-primary-50">
+                                {{ pos.current_value | number:'1.0-0' }} {{ currency() }}
+                            </p>
+                            <div class="flex items-center gap-1.5 justify-end mt-0.5">
+                                <span class="text-[10px] font-bold tabular-nums" [class]="pnlClass(pos.unrealized_pnl_pct)">
+                                    {{ pnlSign(pos.unrealized_pnl_pct) }}{{ pos.unrealized_pnl_pct | number:'1.2-2' }}%
+                                </span>
+                                <span class="text-[9px] text-primary-300 dark:text-primary-700">·</span>
+                                <span class="text-[10px] font-medium tabular-nums" [class]="pnlClass(pos.change_1d_pct)">
+                                    {{ pnlSign(pos.change_1d_pct) }}{{ pos.change_1d_pct | number:'1.2-2' }}% 1D
+                                </span>
+                            </div>
+                        </div>
+
+                    </a>
+                    }
+                </div>
+            </div>
+            } @else {
+            <div class="text-center py-4">
+                <p class="text-sm text-primary-400 dark:text-primary-600">No positions in this envelope.</p>
+            </div>
+            }
+
+        </div>
+    </div>
+</section>
+}

@@ -56,6 +56,10 @@ PERIOD_DAYS   = {"1w": 7, "1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "3y": 109
 # Matches the default asyncio threadpool size to avoid over-scheduling.
 _MAX_FETCH_WORKERS = 20
 
+# Minimum share count treated as a non-zero position.  Anything at or below
+# this threshold is considered fully closed to avoid floating-point dust.
+_MIN_SHARES = 1e-9
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public: WAC position computation
@@ -96,7 +100,7 @@ def compute_ticker_wac(txs: list[dict]) -> list[dict]:
             holdings[env]["cost_basis"] += total
         else:
             h = holdings[env]
-            if h["shares"] > 1e-9:
+            if h["shares"] > _MIN_SHARES:
                 sell_ratio       = min(shares / h["shares"], 1.0)
                 h["cost_basis"] -= h["cost_basis"] * sell_ratio
                 h["shares"]      = max(h["shares"] - shares, 0.0)
@@ -110,7 +114,7 @@ def compute_ticker_wac(txs: list[dict]) -> list[dict]:
             "cost_basis":     round(h["cost_basis"], 2),
         }
         for env, h in sorted(holdings.items())
-        if h["shares"] > 1e-8
+        if h["shares"] > _MIN_SHARES
     ]
 
 
@@ -148,7 +152,7 @@ def compute_all_positions(txs: list[dict], envelopes: list[dict]) -> list[dict]:
             h_env[ticker]["shares"]     += shares
         else:
             h = h_env[ticker]
-            if h["shares"] > 1e-9:
+            if h["shares"] > _MIN_SHARES:
                 sell_ratio      = min(shares / h["shares"], 1.0)
                 h["cost_basis"] -= h["cost_basis"] * sell_ratio
                 h["shares"]     = max(h["shares"] - shares, 0.0)
@@ -156,7 +160,7 @@ def compute_all_positions(txs: list[dict], envelopes: list[dict]) -> list[dict]:
     result = []
     for env_name, h_env in holdings.items():
         for ticker, h in h_env.items():
-            if h["shares"] > 1e-8:
+            if h["shares"] > _MIN_SHARES:
                 result.append({
                     "ticker":       ticker,
                     "envelope_name":env_name,
@@ -197,14 +201,14 @@ def compute_sell_pnl(txs: list[dict]) -> dict[int, dict]:
             h["shares"]     += shares
             h["cost_basis"] += total
         else:
-            if h["shares"] > 1e-9 and tx.get("id") is not None:
+            if h["shares"] > _MIN_SHARES and tx.get("id") is not None:
                 wac              = h["cost_basis"] / h["shares"]
                 effective_shares = min(shares, h["shares"])
                 cost_of_sale     = round(wac * effective_shares, 2)
                 realized_pnl     = round(total - cost_of_sale, 2)
                 realized_pnl_pct = round(realized_pnl / cost_of_sale * 100, 2) if cost_of_sale else 0.0
                 result[tx["id"]] = {"realized_pnl": realized_pnl, "realized_pnl_pct": realized_pnl_pct}
-            sell_ratio       = min(shares / h["shares"], 1.0) if h["shares"] > 1e-9 else 0.0
+            sell_ratio       = min(shares / h["shares"], 1.0) if h["shares"] > _MIN_SHARES else 0.0
             h["cost_basis"] -= h["cost_basis"] * sell_ratio
             h["shares"]      = max(h["shares"] - shares, 0.0)
 
@@ -233,7 +237,7 @@ def _apply_tx(holdings: dict[str, float], tx: dict[str, Any]) -> None:
         ticker = (tx.get("ticker") or "").upper()
         shares = float(tx.get("shares") or 0.0)
         remaining = holdings.get(ticker, 0.0) - shares
-        if remaining > 1e-9:
+        if remaining > _MIN_SHARES:
             holdings[ticker] = remaining
         else:
             holdings.pop(ticker, None)
@@ -252,7 +256,7 @@ def _envelope_value(
     """
     total = holdings.get("__cash__", 0.0)
     for ticker, shares in holdings.items():
-        if ticker == "__cash__" or shares < 1e-9 or closes.empty or ticker not in closes.columns:
+        if ticker == "__cash__" or shares < _MIN_SHARES or closes.empty or ticker not in closes.columns:
             continue
         col_slice = closes[ticker].loc[:day].dropna()
         if col_slice.empty:
@@ -506,7 +510,7 @@ def compute_envelope_overview(
     # aligned to the existing trading-day index so the Euronext calendar does
     # not pollute trading_days with Paris-only market days.
     if wpea_col is not None and _BENCHMARK in equity_tickers and not closes.empty:
-        closes[_BENCHMARK] = wpea_col.reindex(closes.index, method="ffill").bfill()
+        closes[_BENCHMARK] = wpea_col.reindex(closes.index).ffill().bfill()
 
     # Replay all transactions BEFORE the window to build opening state.
     # sorted_txs is already in full-datetime (insertion) order — slicing it
@@ -569,7 +573,7 @@ def compute_envelope_overview(
 
         if prev_day is not None:
             pure_abs, prev_val = _pure_price_change(pre_trade, envelope_names, closes, day, prev_day)
-            pure_pct = (pure_abs / prev_val * 100.0) if prev_val > 1e-9 else 0.0
+            pure_pct = (pure_abs / prev_val * 100.0) if prev_val > _MIN_SHARES else 0.0
             daily_pure_changes.append({
                 "date":       day_str,
                 "change":     round(pure_abs, 2),

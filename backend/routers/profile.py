@@ -13,7 +13,8 @@ SELL       +total (price×shares-fees) -shares
 DIVIDEND   +total                   none
 
 cash_available on Envelope is the authoritative running balance.
-It is updated atomically in the same session.commit() as the Transaction insert.
+Updated via an atomic SQL UPDATE (cash_available = cash_available ± delta) so
+concurrent transactions to the same envelope cannot produce a stale-read race.
 The dashboard reads it directly — no ledger replay needed.
 
 envelope_name is NOT a column on Transaction.
@@ -26,20 +27,27 @@ more informative when a portfolio is heavily cash-weighted.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+import logging
+import time
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from config import get_settings as app_settings
 from deps import SessionDep, get_current_username
 from models.models import Envelope, Transaction, User, WatchlistItem
 from models.schemas import (
+    DashboardLedgerResponse,
     DashboardResponse,
     EnvelopeOverviewResponse,
     EnvelopeRequest,
+    RawPositionRow,
+    StaticTotals,
     TickerRequest,
     TickerSearchResult,
     TransactionOut,
@@ -54,6 +62,7 @@ from services.portfolio_engine import compute_all_positions, compute_envelope_ov
 from services.search_service import search_tickers
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
+log = logging.getLogger(__name__)
 
 _DEPOSIT_PERIODS: dict[str, int] = {"30d": 30, "90d": 90, "180d": 180, "1y": 365, "5y": 1825}
 _SEMAPHORE = asyncio.Semaphore(5)
@@ -92,6 +101,8 @@ def update_settings(
         user.apprise_url = req.apprise_url or None
     if req.dark_mode is not None:
         user.dark_mode = req.dark_mode
+    if req.earnings_notify is not None:
+        user.earnings_notify = req.earnings_notify
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -148,9 +159,19 @@ def _tx_dict(tx: Transaction) -> dict:
 def _fetch_ticker_snapshot(ticker: str, force: bool = False) -> dict:
     """Lightweight price fetch for dashboard rows. Runs in a threadpool."""
     f = YFinanceFetcher(ticker, force=force)
-    info = f.info()
     current = f.get_float("currentPrice") or f.get_float("regularMarketPrice") or 0.0
     prev    = f.get_float("previousClose") or f.get_float("regularMarketPreviousClose") or 0.0
+
+    for attempt in range(1, 3):
+        if current > 0:
+            break
+        log.warning("Zero price for %s (attempt %d) — retrying in 1 s", ticker, attempt)
+        time.sleep(1.0)
+        f = YFinanceFetcher(ticker, force=True)
+        current = f.get_float("currentPrice") or f.get_float("regularMarketPrice") or 0.0
+        prev    = f.get_float("previousClose") or f.get_float("regularMarketPreviousClose") or 0.0
+
+    info = f.info()
     change_1d     = round(current - prev, 4) if current and prev else 0.0
     change_1d_pct = round(change_1d / prev * 100, 2) if prev else 0.0
 
@@ -197,7 +218,110 @@ def _fallback_snapshot(ticker: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Dashboard
+# Dashboard — fast ledger slice (DB + CPU only, no yfinance)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/dashboard/ledger",
+    response_model=DashboardLedgerResponse,
+    summary="Fast DB-only dashboard slice: envelopes, ledger, raw positions (~20 ms)",
+)
+def get_dashboard_ledger(
+    session: SessionDep,
+    current_user: Annotated[str, Depends(get_current_username)],
+):
+    # ── 1. DB reads ───────────────────────────────────────────────────────────
+    envelopes = session.exec(
+        select(Envelope).where(Envelope.user == current_user)
+    ).all()
+
+    txs_orm = session.exec(
+        select(Transaction)
+        .where(Transaction.user == current_user)
+        .order_by(Transaction.date.desc())
+        .options(selectinload(Transaction.envelope))
+    ).all()
+
+    txs_dict = [_tx_dict(tx) for tx in txs_orm]
+
+    # ── 2. CPU: WAC + realized P&L ───────────────────────────────────────────
+    envelopes_meta = [{"name": e.name, "color": e.color} for e in envelopes]
+    raw_positions  = compute_all_positions(txs_dict, envelopes_meta)
+    sell_pnl_map   = compute_sell_pnl(txs_dict)
+    txs_out        = [_tx_out(tx, sell_pnl_map) for tx in txs_orm]
+
+    # ── 3. Envelope capital_in (pure ledger math) ─────────────────────────────
+    env_capital_in: dict[str, float] = {e.name: 0.0 for e in envelopes}
+    for tx in txs_dict:
+        if tx["type"] in ("DEPOSIT", "DIVIDEND"):
+            env_capital_in[tx["envelope_name"]] = env_capital_in.get(tx["envelope_name"], 0.0) + tx["total"]
+        elif tx["type"] == "WITHDRAW":
+            env_capital_in[tx["envelope_name"]] = env_capital_in.get(tx["envelope_name"], 0.0) - tx["total"]
+
+    enriched_envelopes = [
+        {
+            "id":             e.id,
+            "name":           e.name,
+            "color":          e.color,
+            "cash_available": round(e.cash_available, 2),
+            "total_value":    round(e.cash_available, 2),  # equity not yet known
+            "capital_in":     round(env_capital_in.get(e.name, 0.0), 2),
+        }
+        for e in envelopes
+    ]
+
+    # ── 4. Static totals (no prices needed) ──────────────────────────────────
+    total_cash = sum(e.cash_available for e in envelopes)
+
+    cash_txs = [
+        (tx["date"][:10], tx["total"] if tx["type"] == "DEPOSIT" else -tx["total"])
+        for tx in txs_dict
+        if tx["type"] in ("DEPOSIT", "WITHDRAW")
+    ]
+    if not cash_txs:
+        net_deposits: dict[str, float] = {k: 0.0 for k in _DEPOSIT_PERIODS}
+    else:
+        today = datetime.now(UTC).date()
+        cutoffs = {k: str(today - timedelta(days=d)) for k, d in _DEPOSIT_PERIODS.items()}
+        net_deposits = {
+            k: round(sum(amt for date, amt in cash_txs if date >= cutoff), 2)
+            for k, cutoff in cutoffs.items()
+        }
+
+    cutoff_90d = str(datetime.now(UTC).date() - timedelta(days=90))
+    dividend_income_90d = round(
+        sum(tx["total"] for tx in txs_dict if tx["type"] == "DIVIDEND" and tx["date"][:10] >= cutoff_90d),
+        2,
+    )
+
+    user_obj = session.get(User, current_user)
+    user_currency = (user_obj.currency if user_obj else None) or app_settings().DEFAULT_CURRENCY
+
+    return DashboardLedgerResponse(
+        envelopes=enriched_envelopes,
+        transactions=txs_out,
+        user_currency=user_currency,
+        raw_positions=[
+            RawPositionRow(
+                ticker=p["ticker"],
+                envelope_name=p["envelope_name"],
+                shares=p["shares"],
+                avg_cost=p["avg_cost"],
+                cost_basis=p["cost_basis"],
+            )
+            for p in raw_positions
+        ],
+        static_totals=StaticTotals(
+            total_cash=round(total_cash, 2),
+            net_deposits=net_deposits,
+            dividend_income_90d=dividend_income_90d,
+        ),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dashboard — full (DB + yfinance live prices)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -341,7 +465,7 @@ async def get_dashboard(
     )
 
     user_obj = session.get(User, current_user)
-    user_currency = (user_obj.currency if user_obj else None) or "€"
+    user_currency = (user_obj.currency if user_obj else None) or app_settings().DEFAULT_CURRENCY
 
     return {
         "watchlist":     [price_map[t] for t in watchlist_tickers if t in price_map],
@@ -699,13 +823,12 @@ def add_transaction(
     )
     session.add(tx)
 
-    # Update running cash balance atomically
-    if tx_type in ("SELL", "DEPOSIT", "DIVIDEND"):
-        envelope.cash_available = round(envelope.cash_available + total, 10)
-    else:
-        envelope.cash_available = round(envelope.cash_available - total, 10)
-
-    session.add(envelope)
+    # Atomic SQL UPDATE prevents stale-read race when two transactions hit the same envelope concurrently
+    delta = round(total, 2)
+    adjustment = delta if tx_type in ("SELL", "DEPOSIT", "DIVIDEND") else -delta
+    session.exec(
+        sa_update(Envelope).where(Envelope.id == envelope.id).values(cash_available=Envelope.cash_available + adjustment)
+    )
     session.commit()
     session.refresh(tx)
 
@@ -730,13 +853,14 @@ def delete_transaction(
     if not db_tx or db_tx.user != current_user:
         raise HTTPException(status_code=404, detail="Transaction not found.")
 
-    envelope = session.get(Envelope, db_tx.envelope_id)
-    if envelope:
-        if db_tx.type in ("SELL", "DEPOSIT", "DIVIDEND"):
-            envelope.cash_available = round(envelope.cash_available - db_tx.total, 10)
-        else:
-            envelope.cash_available = round(envelope.cash_available + db_tx.total, 10)
-        session.add(envelope)
+    if db_tx.envelope_id:
+        delta = round(db_tx.total, 2)
+        adjustment = -delta if db_tx.type in ("SELL", "DEPOSIT", "DIVIDEND") else delta
+        session.exec(
+            sa_update(Envelope)
+            .where(Envelope.id == db_tx.envelope_id)
+            .values(cash_available=Envelope.cash_available + adjustment)
+        )
 
     session.delete(db_tx)
     session.commit()

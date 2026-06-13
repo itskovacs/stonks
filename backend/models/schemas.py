@@ -45,7 +45,7 @@ class LoginRegisterModel(BaseModel):
         str,
         StringConstraints(min_length=1, max_length=19, pattern=r"^[a-zA-Z0-9_-]+$"),
     ]
-    password: str
+    password: Annotated[str, StringConstraints(min_length=4)]
 
 
 class AuthParams(BaseModel):
@@ -111,6 +111,7 @@ class UserSettingsRequest(BaseModel):
     currency: str | None = Field(default=None, min_length=1, max_length=10, description="Currency symbol, e.g. €, $, £")
     apprise_url: str | None = Field(default=None, description="Comma-separated Apprise notification URLs")
     dark_mode: bool | None = Field(default=None)
+    earnings_notify: bool | None = Field(default=None)
 
 
 class UserSettingsOut(BaseModel):
@@ -119,6 +120,7 @@ class UserSettingsOut(BaseModel):
     currency: str | None
     apprise_url: str | None
     dark_mode: bool | None
+    earnings_notify: bool | None
 
 
 # =============================================================================
@@ -130,21 +132,34 @@ class AlertRequest(BaseModel):
     ticker: str = Field(min_length=1, max_length=20)
     target_price: float = Field(gt=0)
     trigger_above: bool
+    notes: str | None = Field(default=None, max_length=500)
+    actionable: bool = False
 
     @field_validator("ticker")
     @classmethod
     def normalize_ticker(cls, v: str) -> str:
         return v.strip().upper()
 
+    @field_validator("notes")
+    @classmethod
+    def normalize_notes(cls, v: str | None) -> str | None:
+        if v is not None:
+            stripped = v.strip()
+            return stripped if stripped else None
+        return None
+
 
 class AlertUpdateRequest(BaseModel):
     target_price: float | None = Field(default=None, gt=0)
     trigger_above: bool | None = None
+    notes: str | None = None  # None = don't change; "" = clear; non-empty = set
+    actionable: bool | None = None
 
     @model_validator(mode="after")
     def at_least_one_field(self) -> "AlertUpdateRequest":
-        if self.target_price is None and self.trigger_above is None:
-            raise ValueError("Provide at least one of: target_price, trigger_above")
+        if (self.target_price is None and self.trigger_above is None
+                and self.notes is None and self.actionable is None):
+            raise ValueError("Provide at least one field to update")
         return self
 
 
@@ -157,6 +172,8 @@ class AlertOut(BaseModel):
     trigger_above: bool
     is_armed: bool
     last_triggered: date | None
+    notes: str | None
+    actionable: bool
 
 
 # =============================================================================
@@ -512,6 +529,36 @@ class DashboardResponse(BaseModel):
     user_currency: str
 
 
+class RawPositionRow(BaseModel):
+    """Position computed from WAC only — no live price fields."""
+    ticker: str
+    envelope_name: str
+    shares: float
+    avg_cost: float
+    cost_basis: float
+
+
+class StaticTotals(BaseModel):
+    """Totals computable from DB alone — no live prices required."""
+    total_cash: float
+    net_deposits: dict[str, float]
+    dividend_income_90d: float
+
+
+class DashboardLedgerResponse(BaseModel):
+    """
+    Fast DB+CPU slice of the dashboard. Returned by GET /profile/dashboard/ledger
+    in ~20 ms. Contains everything that does not require a yfinance call so the
+    frontend can render envelopes, the transaction ledger, and position skeletons
+    while the full /dashboard market-data call is still in flight.
+    """
+    envelopes: list[EnvelopeSummary]   # total_value = cash_available only (no equity yet)
+    transactions: list[TransactionOut]
+    user_currency: str
+    raw_positions: list[RawPositionRow]
+    static_totals: StaticTotals
+
+
 # =============================================================================
 # PORTFOLIO OVERVIEW
 # =============================================================================
@@ -588,6 +635,7 @@ class ProjectionRequest(BaseModel):
     deposit:           float = Field(ge=0.0, default=0.0)
     annual_rate_pct:   float = Field(ge=0.0, le=100.0)
     deposit_frequency: DepositFrequency = DepositFrequency.MONTHLY
+    initial_balance:   float | None = Field(default=None, ge=0.0)
 
 
 class ProjectionDataset(BaseModel):
@@ -626,3 +674,60 @@ class ProjectionResponse(BaseModel):
     milestones: list[ProjectionMilestone]
     summary:    ProjectionSummary
     inputs:     ProjectionInputs
+
+
+# =============================================================================
+# EARNINGS CALENDAR
+# =============================================================================
+
+
+class EarningsEntry(BaseModel):
+    ticker: str
+    company_name: str | None
+    earnings_date: str
+    sector: str | None
+    currency: str | None
+    history: list[PricePoint]
+
+
+class EarningsCalendarResponse(BaseModel):
+    entries: list[EarningsEntry]
+    generated_at: str
+
+
+# =============================================================================
+# SCREENER
+# =============================================================================
+
+
+class ScreenerRow(BaseModel):
+    ticker: str
+    name: str
+    sector: str | None
+    currency: str
+    current_price: float
+    change_1d_pct: float
+    change_5d_pct: float | None
+    change_1m_pct: float | None
+    rsi_14: float | None
+    bollinger_b: float | None
+    bollinger_signal: str | None
+    sma_50: float | None
+    sma_200: float | None
+    sma_signal: str | None
+    macd_signal: str | None
+    stochastic_k: float | None
+    stochastic_signal: str | None
+    volume_trend_ratio: float | None
+    volume_trend_signal: str | None
+    buy_pct: int
+    hold_pct: int
+    sell_pct: int
+    is_held: bool
+
+
+class ScreenerSentiment(BaseModel):
+    ticker: str
+    sentiment_score: float  # -1.0 to 1.0 (winsorized)
+    label: str              # positive | neutral | negative
+    article_count: int

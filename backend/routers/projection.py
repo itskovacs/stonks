@@ -80,6 +80,10 @@ async def project_portfolio(
     initial_balance  = round(total_cash + total_equity, 2)
     initial_invested = round(total_cash + total_cost_basis, 2)
 
+    if body.initial_balance is not None:
+        initial_balance  = round(body.initial_balance, 2)
+        initial_invested = round(body.initial_balance, 2)
+
     return build_projection(
         initial_balance  = initial_balance,
         initial_invested = initial_invested,

@@ -62,23 +62,29 @@ export interface UserSettingsRequest {
     currency?: string | null; // ISO 4217, e.g. "USD" — null to leave unchanged
     apprise_url?: string | null; // comma-separated Apprise URLs — null to leave unchanged
     dark_mode?: boolean | null;
+    earnings_notify?: boolean | null;
 }
 
 export interface UserSettingsOut {
     currency: string | null;
     apprise_url: string | null;
     dark_mode: boolean | null;
+    earnings_notify: boolean | null;
 }
 
 export interface AlertRequest {
     ticker: string; // normalized to uppercase by the API
     target_price: number; // must be > 0
     trigger_above: boolean;
+    notes?: string | null;
+    actionable?: boolean;
 }
 
 export interface AlertUpdateRequest {
-    target_price?: number; // at least one of these two must be provided
+    target_price?: number; // at least one field must be provided
     trigger_above?: boolean;
+    notes?: string; // '' clears the notes field on the backend
+    actionable?: boolean;
 }
 
 export interface AlertOut {
@@ -88,6 +94,8 @@ export interface AlertOut {
     trigger_above: boolean;
     is_armed: boolean;
     last_triggered: string | null; // YYYY-MM-DD date string or null
+    notes: string | null;
+    actionable: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -391,6 +399,15 @@ export interface EnvelopeOut {
 // DASHBOARD
 // ---------------------------------------------------------------------------
 
+export interface AlertableTicker {
+    ticker: string;
+    name: string | null;
+    currency: string;
+    fifty_two_week_high?: number | null;
+    fifty_two_week_low?: number | null;
+    avg_cost?: number | null;
+}
+
 export interface WatchlistRow {
     ticker: string;
     name: string;
@@ -457,6 +474,35 @@ export interface DashboardResponse {
     transactions: TransactionOut[];
     totals: DashboardTotals;
     user_currency: string;
+}
+
+/** Position from WAC computation only — no live price fields. */
+export interface RawPositionRow {
+    ticker: string;
+    envelope_name: string;
+    shares: number;
+    avg_cost: number;
+    cost_basis: number;
+}
+
+/** Totals computable from DB alone — no live prices required. */
+export interface StaticTotals {
+    total_cash: number;
+    net_deposits: Record<DepositPeriod, number>;
+    dividend_income_90d: number;
+}
+
+/**
+ * Fast DB+CPU slice returned by GET /api/profile/dashboard/ledger (~20 ms).
+ * Arrives before the full dashboard and lets the frontend render envelopes,
+ * the transaction ledger, and position skeletons immediately.
+ */
+export interface DashboardLedgerResponse {
+    envelopes: EnvelopeSummary[];   // total_value = cash only until market data arrives
+    transactions: TransactionOut[];
+    user_currency: string;
+    raw_positions: RawPositionRow[];
+    static_totals: StaticTotals;
 }
 
 // ---------------------------------------------------------------------------
@@ -545,6 +591,7 @@ export interface ProjectionRequest {
     deposit: number;
     annual_rate_pct: number;
     deposit_frequency: DepositFrequency;
+    initial_balance?: number;
 }
 
 export interface ProjectionDataset {
@@ -583,4 +630,60 @@ export interface ProjectionResponse {
     milestones: ProjectionMilestone[];
     summary: ProjectionSummary;
     inputs: ProjectionInputs;
+}
+
+// ---------------------------------------------------------------------------
+// EARNINGS CALENDAR  GET /api/earnings
+// ---------------------------------------------------------------------------
+
+export interface EarningsEntry {
+    ticker: string;
+    company_name: string | null;
+    earnings_date: string; // YYYY-MM-DD
+    sector: string | null;
+    currency: string | null;
+    history: PricePoint[]; // 5 most recent trading days
+}
+
+export interface EarningsCalendarResponse {
+    entries: EarningsEntry[];
+    generated_at: string; // ISO-8601 UTC
+}
+
+// ---------------------------------------------------------------------------
+// SCREENER  GET /api/profile/screener
+//           GET /api/profile/screener/{ticker}/sentiment
+// ---------------------------------------------------------------------------
+
+export interface ScreenerRow {
+    ticker: string;
+    name: string;
+    sector: string | null;
+    currency: string;
+    current_price: number;
+    change_1d_pct: number;
+    change_5d_pct: number | null;
+    change_1m_pct: number | null;
+    rsi_14: number | null;
+    bollinger_b: number | null;
+    bollinger_signal: SignalValue | null;
+    sma_50: number | null;
+    sma_200: number | null;
+    sma_signal: SignalValue | null;
+    macd_signal: SignalValue | null;
+    stochastic_k: number | null;
+    stochastic_signal: SignalValue | null;
+    volume_trend_ratio: number | null;
+    volume_trend_signal: SignalValue | null;
+    buy_pct: number;
+    hold_pct: number;
+    sell_pct: number;
+    is_held: boolean;
+}
+
+export interface ScreenerSentiment {
+    ticker: string;
+    sentiment_score: number; // -1.0 to 1.0
+    label: string;           // positive | neutral | negative
+    article_count: number;
 }
