@@ -89,7 +89,7 @@ A demo is available at [itskovacs-stonks.netlify.app](https://itskovacs-stonks.n
 |         |         |
 |:-------:|:-------:|
 | ![](./.github/sc_dashboard.png) | ![](./.github/sc_ticker1.png) |
-| ![](./.github/sc_dashboard_chart.png) | ![](./.github/sc_ticker2.png) |
+| ![](./.github/sc_dashboard_chart.png) | ![](./.github/sc_alerts.png) |
 
 </div>
 
